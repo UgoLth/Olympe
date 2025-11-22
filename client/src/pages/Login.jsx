@@ -124,7 +124,7 @@ export default function Login() {
             <h2 className="font-semibold mb-1">Visualise ton patrimoine</h2>
             <p className="text-sm text-white/60 leading-relaxed">
               Tableaux de bord, graphiques, indicateurs. Une interface pensée
-              pour comprendre la finance sans se prendre la tête.
+              pour comprendre la finance sans se prendre la tête
             </p>
           </div>
         </div>
