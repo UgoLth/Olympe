@@ -75,7 +75,7 @@ export default function Dashboard() {
           <SidebarItem
             icon={Wallet}
             label="Comptes & placements"
-            // onClick={() => navigate("/comptes")} // à activer plus tard si tu as la page
+            onClick={() => navigate("/accounts")} // 👈 redirection vers ta page comptes
           />
           <SidebarItem
             icon={BarChart3}
@@ -134,7 +134,9 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <p className="text-sm text-gray-700">
               Valeur totale :{" "}
-              <span className="font-semibold text-[#D4AF37]">{totalValue}</span>
+              <span className="font-semibold text-[#D4AF37]">
+                {totalValue}
+              </span>
             </p>
           </div>
         </header>
@@ -156,7 +158,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
         active
           ? "bg-white/5 text-white"
-          : "text-white/60 hover:bg-white/5 hover:text-white"
+          : "text-white/60 hover:bg白/5 hover:text-white"
       } transition`}
     >
       <Icon size={16} />

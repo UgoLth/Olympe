@@ -4,6 +4,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";   // ⬅️ AJOUT IMPORTANT
 import Glossary from "./pages/Glossary";
+import Accounts from "./pages/Accounts";
 
 function App() {
   return (
@@ -19,6 +20,9 @@ function App() {
         <Route path="/settings" element={<Settings />} />  {/* ⬅️ AJOUT */}
 
         <Route path="/glossaire" element={<Glossary />} />
+
+        <Route path="/accounts" element={<Accounts />} />
+
       </Routes>
     </BrowserRouter>
   );
