@@ -5,6 +5,8 @@ import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";   // ⬅️ AJOUT IMPORTANT
 import Glossary from "./pages/Glossary";
 import Accounts from "./pages/Accounts";
+import FinnhubTest from "./pages/FinnhubTest";
+import AccountHoldings from "./pages/AccountHoldings";
 
 function App() {
   return (
@@ -22,6 +24,11 @@ function App() {
         <Route path="/glossaire" element={<Glossary />} />
 
         <Route path="/accounts" element={<Accounts />} />
+
+        <Route path="/FinnhubTest" element={<FinnhubTest />} />
+
+        <Route path="/accounts/:accountId/holdings" element={<AccountHoldings />} />
+
 
       </Routes>
     </BrowserRouter>

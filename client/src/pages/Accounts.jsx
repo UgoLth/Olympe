@@ -97,9 +97,10 @@ export default function Accounts() {
       .order("created_at", { ascending: false });
 
     if (error) {
+      console.error(error);
       setError("Erreur lors du chargement des comptes.");
     } else {
-      setAccounts(data);
+      setAccounts(data || []);
     }
     setLoadingAccounts(false);
   };
@@ -162,7 +163,7 @@ export default function Accounts() {
     setError("");
 
     const initial = form.initialAmount
-      ? parseFloat(form.initialAmount.replace(",", "."))
+      ? parseFloat(form.initialAmount.replace(",", ".")) // au cas où l’utilisateur tape une virgule
       : 0;
 
     const payload = {
@@ -232,18 +233,37 @@ export default function Accounts() {
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <SidebarItem icon={Home} label="Tableau de bord" onClick={() => navigate("/dashboard")} />
-          <SidebarItem icon={Wallet} label="Comptes & placements" active onClick={() => navigate("/accounts")} />
+          <SidebarItem
+            icon={Home}
+            label="Tableau de bord"
+            onClick={() => navigate("/dashboard")}
+          />
+          <SidebarItem
+            icon={Wallet}
+            label="Comptes & placements"
+            active
+            onClick={() => navigate("/accounts")}
+          />
           <SidebarItem icon={BarChart3} label="Analyse" />
           <SidebarItem icon={PieChart} label="Portefeuille" />
-          <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
+          <SidebarItem
+            icon={GraduationCap}
+            label="Glossaire"
+            onClick={() => navigate("/glossaire")}
+          />
         </nav>
 
         <div className="px-4 pb-4">
-          <button onClick={() => navigate("/settings")} className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2 mb-2">
+          <button
+            onClick={() => navigate("/settings")}
+            className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2 mb-2"
+          >
             <Settings size={16} /> Paramètres
           </button>
-          <button onClick={handleLogout} className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2">
+          <button
+            onClick={handleLogout}
+            className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2"
+          >
             <LogOut size={16} /> Déconnexion
           </button>
           <p className="text-[10px] text-white/25 mt-2">v0.1 – Olympe</p>
@@ -263,17 +283,21 @@ export default function Accounts() {
             })}
           </p>
           <p className="text-sm">
-            Valeur totale : <span className="font-semibold text-[#D4AF37]">{totalValue}</span>
+            Valeur totale :{" "}
+            <span className="font-semibold text-[#D4AF37]">
+              {totalValue}
+            </span>
           </p>
         </header>
 
         {/* CONTENT */}
         <div className="flex-1 p-6 overflow-y-auto">
-
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-lg font-semibold">Comptes & placements</h1>
-              <p className="text-sm text-gray-500">Gérez vos comptes et vos soldes initiaux.</p>
+              <p className="text-sm text-gray-500">
+                Gérez vos comptes et vos soldes initiaux.
+              </p>
             </div>
 
             <motion.button
@@ -297,7 +321,9 @@ export default function Accounts() {
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <p className="font-medium text-gray-800 text-sm">Vos comptes</p>
-              <p className="text-xs text-gray-500">{accounts.length} compte(s)</p>
+              <p className="text-xs text-gray-500">
+                {accounts.length} compte(s)
+              </p>
             </div>
 
             {loadingAccounts ? (
@@ -309,7 +335,10 @@ export default function Accounts() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {accounts.map((account, index) => {
-                  const type = account.type || inferTypeFromProduct(account.product);
+                  const type =
+                    account.type || inferTypeFromProduct(account.product);
+                  const isInvestmentAccount =
+                    type === "investment" || type === "retirement";
 
                   return (
                     <motion.div
@@ -320,7 +349,9 @@ export default function Accounts() {
                       className="px-4 py-3 flex items-center justify-between hover:bg-gray-50"
                     >
                       <div>
-                        <p className="text-sm font-semibold">{account.name}</p>
+                        <p className="text-sm font-semibold">
+                          {account.name}
+                        </p>
 
                         <div className="mt-1 flex items-center gap-2 flex-wrap">
                           {account.product && (
@@ -339,18 +370,45 @@ export default function Accounts() {
                         <p className="text-xs text-gray-500 mt-1">
                           Solde initial :{" "}
                           <strong>
-                            {Number(account.initial_amount).toLocaleString("fr-FR", {
-                              minimumFractionDigits: 2,
-                            })}{" "}
+                            {Number(account.initial_amount || 0).toLocaleString(
+                              "fr-FR",
+                              {
+                                minimumFractionDigits: 2,
+                              }
+                            )}{" "}
                             {account.currency}
                           </strong>
                           {account.created_at && (
-                            <> • Créé le {new Date(account.created_at).toLocaleDateString("fr-FR")}</>
+                            <>
+                              {" "}
+                              • Créé le{" "}
+                              {new Date(
+                                account.created_at
+                              ).toLocaleDateString("fr-FR")}
+                            </>
                           )}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {/* 👉 Bouton pour gérer les placements, seulement pour les comptes invest / retraite */}
+                        {isInvestmentAccount && (
+                          <button
+                            onClick={() =>
+                              navigate(`/accounts/${account.id}/holdings`, {
+                                state: {
+                                  accountId: account.id,
+                                  accountName: account.name,
+                                  accountType: type,
+                                },
+                              })
+                            }
+                            className="px-3 py-1.5 text-xs bg-[#0F1013] border border-[#D4AF37]/40 text-[#D4AF37] rounded hover:bg-[#1a1c21]"
+                          >
+                            Voir les placements
+                          </button>
+                        )}
+
                         <button
                           onClick={() => openEditForm(account)}
                           className="px-3 py-1.5 text-xs bg-white border border-gray-200 rounded hover:bg-gray-100"
@@ -393,9 +451,13 @@ export default function Accounts() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h2 className="text-base font-semibold">
-                      {editingAccount ? "Modifier le compte" : "Nouveau compte"}
+                      {editingAccount
+                        ? "Modifier le compte"
+                        : "Nouveau compte"}
                     </h2>
-                    <p className="text-xs text-gray-500 mt-1">Renseigne les informations du compte.</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Renseigne les informations du compte.
+                    </p>
                   </div>
                   <button
                     onClick={() => {
@@ -411,7 +473,9 @@ export default function Accounts() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {/* NOM */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">Nom du compte</label>
+                    <label className="text-xs font-medium text-gray-700">
+                      Nom du compte
+                    </label>
                     <input
                       type="text"
                       name="name"
@@ -425,7 +489,9 @@ export default function Accounts() {
 
                   {/* TYPE */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">Type</label>
+                    <label className="text-xs font-medium text-gray-700">
+                      Type
+                    </label>
                     <select
                       name="type"
                       value={form.type}
@@ -444,7 +510,9 @@ export default function Accounts() {
 
                   {/* PRODUIT */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">Produit / compte précis</label>
+                    <label className="text-xs font-medium text-gray-700">
+                      Produit / compte précis
+                    </label>
                     <select
                       name="product"
                       value={form.product}
@@ -452,13 +520,15 @@ export default function Accounts() {
                       disabled={!form.type}
                       className="w-full border rounded-md px-3 py-2 mt-1 text-sm disabled:bg-gray-100"
                     >
-                      {!form.type && <option>Choisir un type d’abord...</option>}
+                      {!form.type && (
+                        <option>Choisir un type d’abord...</option>
+                      )}
                       {form.type &&
                         [
                           <option key={"_"} value="">
                             Sélectionner...
                           </option>,
-                          ...PRODUCTS_BY_TYPE[form.type].map((p) => (
+                          ...availableProducts.map((p) => (
                             <option key={p} value={p}>
                               {p}
                             </option>
@@ -470,7 +540,9 @@ export default function Accounts() {
                   {/* SOLDE + DEVISE */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Solde initial</label>
+                      <label className="text-xs font-medium text-gray-700">
+                        Solde initial
+                      </label>
                       <input
                         type="number"
                         step="0.01"
@@ -482,7 +554,9 @@ export default function Accounts() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Devise</label>
+                      <label className="text-xs font-medium text-gray-700">
+                        Devise
+                      </label>
                       <select
                         name="currency"
                         value={form.currency}
@@ -517,7 +591,11 @@ export default function Accounts() {
                       disabled={saving}
                       className="px-4 py-2 bg-[#D4AF37] text-[#0F1013] rounded-md text-xs font-semibold"
                     >
-                      {saving ? "Enregistrement..." : editingAccount ? "Mettre à jour" : "Créer le compte"}
+                      {saving
+                        ? "Enregistrement..."
+                        : editingAccount
+                        ? "Mettre à jour"
+                        : "Créer le compte"}
                     </motion.button>
                   </div>
                 </form>
@@ -536,7 +614,9 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
-        active ? "bg-white/5 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
+        active
+          ? "bg:white/5 text-white"
+          : "text-white/60 hover:bg-white/5 hover:text-white"
       }`}
     >
       <Icon size={16} />
