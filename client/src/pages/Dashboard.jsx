@@ -66,11 +66,32 @@ export default function Dashboard() {
 
         {/* Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <SidebarItem icon={Home} label="Tableau de bord" active />
-          <SidebarItem icon={Wallet} label="Comptes & placements" />
-          <SidebarItem icon={BarChart3} label="Analyse" />
-          <SidebarItem icon={PieChart} label="Portefeuille" />
-          <SidebarItem icon={GraduationCap} label="Glossaire" />
+          <SidebarItem
+            icon={Home}
+            label="Tableau de bord"
+            active
+            onClick={() => navigate("/dashboard")}
+          />
+          <SidebarItem
+            icon={Wallet}
+            label="Comptes & placements"
+            // onClick={() => navigate("/comptes")} // à activer plus tard si tu as la page
+          />
+          <SidebarItem
+            icon={BarChart3}
+            label="Analyse"
+            // onClick={() => navigate("/analyse")}
+          />
+          <SidebarItem
+            icon={PieChart}
+            label="Portefeuille"
+            // onClick={() => navigate("/portefeuille")}
+          />
+          <SidebarItem
+            icon={GraduationCap}
+            label="Glossaire"
+            onClick={() => navigate("/glossaire")}
+          />
         </nav>
 
         {/* Bottom */}
@@ -119,16 +140,19 @@ export default function Dashboard() {
         </header>
 
         {/* ZONE CENTRALE */}
-        <div className="flex-1 p-6 overflow-y-auto"></div>
+        <div className="flex-1 p-6 overflow-y-auto">
+          {/* Contenu du tableau de bord ici */}
+        </div>
       </main>
     </div>
   );
 }
 
-// Composants internes
-function SidebarItem({ icon: Icon, label, active }) {
+// Composant interne pour les items du menu
+function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
+      onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
         active
           ? "bg-white/5 text-white"
