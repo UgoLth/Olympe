@@ -15,8 +15,56 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 
-// même nom que dans .env.local
+// mêmes noms que dans .env.local
 const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+/**
+ * Helper : récupère le prix depuis l’Edge Function EODHD
+ * (appel direct à l’URL de la function, comme dans ton test PowerShell)
+ */
+async function fetchEodhdPrice(symbol) {
+  if (!SUPABASE_URL) {
+    console.error("VITE_SUPABASE_URL manquante");
+    return null;
+  }
+
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/eodhd-price`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Si tu veux sécuriser un peu plus :
+        // apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ symbol }),
+    });
+
+    const data = await resp.json().catch(() => null);
+    console.log("Réponse Edge Function EODHD :", data);
+
+    if (!data || data.price == null) {
+      console.warn("EODHD: pas de champ price dans la réponse :", data);
+      return null;
+    }
+
+    // gère number OU string "29,6545"
+    const num =
+      typeof data.price === "number"
+        ? data.price
+        : parseFloat(String(data.price).replace(",", "."));
+
+    if (Number.isNaN(num) || num <= 0) {
+      console.warn("EODHD: price invalide :", data.price);
+      return null;
+    }
+
+    return num;
+  } catch (err) {
+    console.error("fetchEodhdPrice error:", err);
+    return null;
+  }
+}
 
 const TYPE_LABELS = {
   cash: "Cash",
@@ -170,12 +218,12 @@ export default function AccountHoldings() {
 
         const res = await fetch(url);
         if (!res.ok) {
-          throw new Error("Erreur API Finnhub");
-        }
-        const json = await res.json();
-
-        if (!cancelled) {
-          setSearchResults(json.result || []);
+          console.warn("Erreur API Finnhub search, status:", res.status);
+        } else {
+          const json = await res.json();
+          if (!cancelled) {
+            setSearchResults(json.result || []);
+          }
         }
       } catch (err) {
         console.error("Erreur Finnhub search:", err);
@@ -207,8 +255,8 @@ export default function AccountHoldings() {
     setSearchResults([]);
     setSearchError("");
 
-    // si pas de clé ou pas de symbole, on s'arrête
-    if (!FINNHUB_API_KEY || !item.symbol) return;
+    // si pas de symbole, on s'arrête
+    if (!item.symbol) return;
 
     // 1) on récupère ou crée l'instrument dans la BDD
     let instrumentId = null;
@@ -247,32 +295,56 @@ export default function AccountHoldings() {
       setForm((prev) => ({ ...prev, instrumentId }));
     }
 
-    // 2) on récupère le prix actuel via /quote pour préremplir le prix d'achat
-    try {
-      const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
-        item.symbol
-      )}&token=${FINNHUB_API_KEY}`;
+    // 2) on récupère le prix actuel : Finnhub d'abord, EODHD ensuite
+    let price = null;
 
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Erreur API Finnhub quote");
+    // ---- Essai 1 : Finnhub ----
+    if (FINNHUB_API_KEY && item.symbol) {
+      try {
+        const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
+          item.symbol
+        )}&token=${FINNHUB_API_KEY}`;
 
-      const quote = await res.json();
-      console.log("Quote Finnhub pour", item.symbol, quote);
+        const res = await fetch(url);
+        if (!res.ok) {
+          console.warn("Erreur API Finnhub quote, status:", res.status);
+        } else {
+          const quote = await res.json();
+          console.log("Quote Finnhub pour", item.symbol, quote);
 
-      if (
-        quote &&
-        typeof quote.c === "number" &&
-        !Number.isNaN(quote.c) &&
-        quote.c > 0
-      ) {
-        setForm((prev) => ({
-          ...prev,
-          buyPrice: quote.c.toFixed(2),
-        }));
+          if (
+            quote &&
+            typeof quote.c === "number" &&
+            !Number.isNaN(quote.c) &&
+            quote.c > 0
+          ) {
+            price = quote.c;
+          }
+        }
+      } catch (err) {
+        console.error("Erreur Finnhub quote:", err);
       }
-    } catch (err) {
-      console.error("Erreur Finnhub quote:", err);
-      // pas grave, on peut remplir le prix à la main
+    }
+
+    // ---- Essai 2 : EODHD (fallback) ----
+    if (!price && item.symbol) {
+      const eodPrice = await fetchEodhdPrice(item.symbol);
+      console.log("Prix EODHD pour", item.symbol, eodPrice);
+      if (
+        typeof eodPrice === "number" &&
+        !Number.isNaN(eodPrice) &&
+        eodPrice > 0
+      ) {
+        price = eodPrice;
+      }
+    }
+
+    // ---- Préremplissage si prix trouvé ----
+    if (price) {
+      setForm((prev) => ({
+        ...prev,
+        buyPrice: price.toFixed(2),
+      }));
     }
   };
 
@@ -494,7 +566,10 @@ export default function AccountHoldings() {
       });
 
       if (movError) {
-        console.error("Erreur lors de l'enregistrement du mouvement SELL :", movError);
+        console.error(
+          "Erreur lors de l'enregistrement du mouvement SELL :",
+          movError
+        );
       }
 
       await fetchAccountAndHoldings(user.id, account.id);
@@ -711,7 +786,9 @@ export default function AccountHoldings() {
                         {h.created_at && (
                           <span className="text-[11px] text-gray-400">
                             Ajouté le{" "}
-                            {new Date(h.created_at).toLocaleDateString("fr-FR")}
+                            {new Date(h.created_at).toLocaleDateString(
+                              "fr-FR"
+                            )}
                           </span>
                         )}
                       </div>
@@ -829,8 +906,8 @@ export default function AccountHoldings() {
                     />
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       Tu peux taper soit un symbole (AAPL, CW8.PA...), soit un
-                      nom (&quot;Apple&quot;, &quot;S&amp;P 500&quot;). Les
-                      deux déclenchent les suggestions.
+                      nom (&quot;Apple&quot;, &quot;S&amp;P 500&quot;). Les deux
+                      déclenchent les suggestions.
                     </p>
 
                     {FINNHUB_API_KEY ? (
