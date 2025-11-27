@@ -1,0 +1,19 @@
+name: Refresh Supabase Prices
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  call-refresh-prices:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Appel de la fonction Supabase refresh-prices
+        run: |
+          curl -X POST "$SUPABASE_FUNCTION_URL" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+        env:
+          SUPABASE_FUNCTION_URL: ${{ secrets.SUPABASE_FUNCTION_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
