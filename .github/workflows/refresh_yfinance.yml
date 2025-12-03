@@ -1,0 +1,32 @@
+name: Refresh prices via yfinance
+
+on:
+  workflow_dispatch:           # pour lancer à la main si tu veux
+  schedule:
+    - cron: "*/20 * * * *"     # toutes les 20 minutes
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+      # adapte la version si besoin
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase-py yfinance
+
+      - name: Run refresh_yfinance script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python scripts/refresh_yfinance_prices.py

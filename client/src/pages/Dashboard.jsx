@@ -15,7 +15,6 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState("");
 
-  // Vérifie qu'un utilisateur est connecté
   useEffect(() => {
     const checkUser = async () => {
       const { data } = await supabase.auth.getUser();
@@ -28,7 +27,6 @@ export default function Dashboard() {
     checkUser();
   }, [navigate]);
 
-  // Gestion du "Se souvenir de moi"
   useEffect(() => {
     const handleBeforeUnload = async () => {
       const remember = localStorage.getItem("olympe_remember_me");
@@ -47,14 +45,12 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  // 📌 Placeholder KPI
   const totalValue = "— €";
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        {/* TITRE + EMAIL */}
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
@@ -72,21 +68,26 @@ export default function Dashboard() {
             active
             onClick={() => navigate("/dashboard")}
           />
+
           <SidebarItem
             icon={Wallet}
             label="Comptes & placements"
-            onClick={() => navigate("/accounts")} // 👈 redirection vers ta page comptes
+            onClick={() => navigate("/accounts")}
           />
+
           <SidebarItem
             icon={BarChart3}
             label="Analyse"
-            // onClick={() => navigate("/analyse")}
+            onClick={() => navigate("/analyse")}
           />
+
+          {/* ✅ Correction ici */}
           <SidebarItem
             icon={PieChart}
             label="Portefeuille"
-            // onClick={() => navigate("/portefeuille")}
+            onClick={() => navigate("/portefeuille")}
           />
+
           <SidebarItem
             icon={GraduationCap}
             label="Glossaire"
@@ -116,9 +117,7 @@ export default function Dashboard() {
 
       {/* MAIN */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* TOPBAR */}
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
-          {/* GAUCHE : la date */}
           <div>
             <p className="text-sm text-gray-500">
               {new Date().toLocaleDateString("fr-FR", {
@@ -130,7 +129,6 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* DROITE : KPI mini */}
           <div className="flex items-center gap-3">
             <p className="text-sm text-gray-700">
               Valeur totale :{" "}
@@ -141,7 +139,6 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* ZONE CENTRALE */}
         <div className="flex-1 p-6 overflow-y-auto">
           {/* Contenu du tableau de bord ici */}
         </div>
@@ -150,7 +147,7 @@ export default function Dashboard() {
   );
 }
 
-// Composant interne pour les items du menu
+// 🔧 SidebarItem corrigé (bug Tailwind fixé)
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
@@ -158,7 +155,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
         active
           ? "bg-white/5 text-white"
-          : "text-white/60 hover:bg白/5 hover:text-white"
+          : "text-white/60 hover:bg-white/5 hover:text-white"
       } transition`}
     >
       <Icon size={16} />
