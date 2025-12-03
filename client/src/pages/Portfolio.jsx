@@ -10,6 +10,18 @@ import {
   Home,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { motion } from "framer-motion";
+
+// 🎨 Chart.js
+import { Doughnut } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function Portfolio() {
   const navigate = useNavigate();
@@ -29,6 +41,16 @@ export default function Portfolio() {
 
   const toNumber = (v) =>
     v === null || v === undefined || v === "" ? 0 : Number(v);
+
+  // Variants pour les KPI (stagger)
+  const kpiVariants = {
+    hidden: { opacity: 0, y: 10 },
+    show: (i) => ({
+      opacity: 1,
+      y: 0,
+      transition: { delay: 0.05 * i, duration: 0.3, ease: "easeOut" },
+    }),
+  };
 
   // ---------- AUTH + INIT ----------
   useEffect(() => {
@@ -156,53 +178,61 @@ export default function Portfolio() {
         );
       }
 
-      // 4) prix historiques (pour clôture veille + 30 jours)
-      const prevCloseByInstrument = {}; // clôture veille
-      const price30dByInstrument = {}; // prix il y a ~30 jours
+      // 4) prix historiques pour calculer les variations jour / 30 jours
+      let prev1dByInstrument = {};
+      let prev30dByInstrument = {};
 
       if (instrumentIds.length > 0) {
-        // ⏱ dates de référence
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+        const now = new Date();
 
-        const yesterdayStart = new Date(todayStart);
-        yesterdayStart.setDate(todayStart.getDate() - 1);
+        const date1d = new Date(now);
+        date1d.setDate(now.getDate() - 1);
+        const iso1d = date1d.toISOString();
 
-        const thirtyDaysAgoStart = new Date(todayStart);
-        thirtyDaysAgoStart.setDate(todayStart.getDate() - 30);
+        const date30d = new Date(now);
+        date30d.setDate(now.getDate() - 30);
+        const iso30d = date30d.toISOString();
 
-        // On récupère TOUS les prix des 30 derniers jours
-        const { data: pricesHistory, error: pricesError } = await supabase
+        // Prix depuis D-1
+        const { data: prices1d, error: p1Error } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
           .in("instrument_id", instrumentIds)
-          .gte("fetched_at", thirtyDaysAgoStart.toISOString())
+          .gte("fetched_at", iso1d)
           .order("fetched_at", { ascending: true });
 
-        if (pricesError) {
-          console.error("Erreur récupération historique des prix :", pricesError);
-        } else if (pricesHistory) {
-          for (const p of pricesHistory) {
+        if (p1Error) {
+          console.error("Erreur récupération prix 1j :", p1Error);
+        } else if (prices1d) {
+          for (const p of prices1d) {
             const id = p.instrument_id;
-            const ts = new Date(p.fetched_at);
-            const price = toNumber(p.price);
-
-            // 4.1) Prix 30 jours : on prend le PREMIER prix rencontré
-            if (!price30dByInstrument[id]) {
-              price30dByInstrument[id] = price;
+            if (!prev1dByInstrument[id]) {
+              prev1dByInstrument[id] = toNumber(p.price); // premier prix après D-1
             }
+          }
+        }
 
-            // 4.2) Clôture veille :
-            // on veut le DERNIER prix de la veille => ts dans [hier 00:00 ; aujourd'hui 00:00[
-            if (ts >= yesterdayStart && ts < todayStart) {
-              // comme c'est trié ASC, on écrase à chaque fois -> on garde le dernier
-              prevCloseByInstrument[id] = price;
+        // Prix depuis D-30
+        const { data: prices30d, error: p30Error } = await supabase
+          .from("asset_prices")
+          .select("instrument_id, price, fetched_at")
+          .in("instrument_id", instrumentIds)
+          .gte("fetched_at", iso30d)
+          .order("fetched_at", { ascending: true });
+
+        if (p30Error) {
+          console.error("Erreur récupération prix 30j :", p30Error);
+        } else if (prices30d) {
+          for (const p of prices30d) {
+            const id = p.instrument_id;
+            if (!prev30dByInstrument[id]) {
+              prev30dByInstrument[id] = toNumber(p.price); // premier prix après D-30
             }
           }
         }
       }
 
-      // -------- LIGNES DE PORTEFEUILLE (valeur + variations prix) ----------
+      // -------- LIGNES DE PORTEFEUILLE ----------
       let totalHoldingsValue = 0;
 
       const computedHoldings = (holdingsData || []).map((h) => {
@@ -219,20 +249,17 @@ export default function Portfolio() {
 
         totalHoldingsValue += value;
 
-        const prevClose = prevCloseByInstrument[h.instrument_id] || 0;
-        const price30d = price30dByInstrument[h.instrument_id] || 0;
+        const prev1d = prev1dByInstrument[h.instrument_id] || 0;
+        const prev30d = prev30dByInstrument[h.instrument_id] || 0;
 
         let dailyChangePct = 0;
         let monthlyChangePct = 0;
 
-        // 📌 Variation jour = (dernier cours - clôture veille) / clôture veille
-        if (prevClose > 0 && currentPrice > 0) {
-          dailyChangePct = ((currentPrice - prevClose) / prevClose) * 100;
+        if (prev1d > 0 && currentPrice > 0) {
+          dailyChangePct = ((currentPrice - prev1d) / prev1d) * 100;
         }
-
-        // 📌 Variation 30 jours = (dernier cours - prix il y a 30 jours) / prix 30j
-        if (price30d > 0 && currentPrice > 0) {
-          monthlyChangePct = ((currentPrice - price30d) / price30d) * 100;
+        if (prev30d > 0 && currentPrice > 0) {
+          monthlyChangePct = ((currentPrice - prev30d) / prev30d) * 100;
         }
 
         dailyChangePct = Number.isFinite(dailyChangePct)
@@ -253,7 +280,7 @@ export default function Portfolio() {
           value,
           dailyChangePct,
           monthlyChangePct,
-          allocationPct: 0, // mis à jour après
+          allocationPct: 0,
           assetClass: instrument.asset_class || null,
         };
       });
@@ -273,50 +300,50 @@ export default function Portfolio() {
 
       const totalValue = totalHoldingsValue + totalStandaloneValue;
 
-      // maj du poids de chaque ligne
       const holdingsWithAllocation = computedHoldings.map((h) => ({
         ...h,
         allocationPct:
           totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
-      // -------- CAMEMBERT : TOTAUX PAR CATÉGORIE ----------
+      // -------- CAMEMBERT ----------
       const categoryTotals = {};
       const addToCategory = (label, amount) => {
         if (!categoryTotals[label]) categoryTotals[label] = 0;
         categoryTotals[label] += amount;
       };
 
-      // holdings → on regarde type de compte + asset_class
       holdingsWithAllocation.forEach((h) => {
         const label = categorizePosition(h.accountType, h.assetClass);
         addToCategory(label, h.value);
       });
 
-      // comptes sans holdings → ex : livrets
       standaloneAccounts.forEach((a) => {
         const label = categorizePosition(a.type, null);
         addToCategory(label, toNumber(a.current_amount));
       });
 
+      // palette Olympe (or / noir / neutres)
       const palette = {
-        Liquidités: "#4B5563",
-        Épargne: "#22C55E",
-        Investissements: "#3B82F6",
-        Crypto: "#EAB308",
-        Autres: "#A855F7",
+        Liquidités: "#111827", // anthracite
+        Épargne: "#D4AF37", // or
+        Investissements: "#1D4ED8", // bleu roi
+        Crypto: "#F59E0B", // or chaud
+        Autres: "#6B7280", // gris neutre
       };
 
       const computedAllocations = Object.entries(categoryTotals).map(
         ([label, amount]) => ({
           label,
           percent:
-            totalValue > 0 ? Math.round((amount / totalValue) * 100) : 0,
+            totalValue > 0
+              ? Math.round((Number(amount) / totalValue) * 100)
+              : 0,
           color: palette[label] || "#6B7280",
         })
       );
 
-      // -------- VARIATIONS PORTFEUILLE (pondérées) ----------
+      // -------- VARIATIONS PORTFEUILLE ----------
       let portfolioDaily = 0;
       let portfolioMonthly = 0;
 
@@ -359,12 +386,49 @@ export default function Portfolio() {
 
   const totalValueDisplay = formatCurrency(summary.totalValue);
 
+  // ---------- DATA CAMEMBERT ----------
+  const hasAllocations =
+    allocations.length > 0 && allocations.some((a) => a.percent > 0);
+
+  const doughnutData = {
+    labels: allocations.map((a) => a.label),
+    datasets: [
+      {
+        data: allocations.map((a) => a.percent),
+        backgroundColor: allocations.map((a) => a.color),
+        borderWidth: 2,
+        borderColor: "#F9FAFB",
+        hoverOffset: 6,
+      },
+    ],
+  };
+
+  const doughnutOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: "68%",
+    plugins: {
+      legend: {
+        display: false,
+      },
+      tooltip: {
+        padding: 8,
+        backgroundColor: "#0F1013",
+        titleColor: "#F9FAFB",
+        bodyColor: "#E5E7EB",
+        cornerRadius: 10,
+        callbacks: {
+          label: (ctx) => `${ctx.label} : ${ctx.parsed}%`,
+        },
+      },
+    },
+  };
+
   // ---------- RENDER ----------
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        {/* TITRE + EMAIL */}
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
@@ -374,7 +438,6 @@ export default function Portfolio() {
           </p>
         </div>
 
-        {/* Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
           <SidebarItem
             icon={Home}
@@ -404,7 +467,6 @@ export default function Portfolio() {
           />
         </nav>
 
-        {/* Bottom */}
         <div className="mt-auto px-4 pb-4 space-y-2">
           <button
             onClick={() => navigate("/settings")}
@@ -426,7 +488,6 @@ export default function Portfolio() {
 
       {/* MAIN */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* TOPBAR */}
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-gray-400">
@@ -444,61 +505,74 @@ export default function Portfolio() {
                 {totalValueDisplay}
               </p>
             </div>
-            <button
-              onClick={async () => {
-                const { data } = await supabase.auth.getUser();
-                if (data?.user) {
-                  await loadPortfolio(data.user.id);
-                }
-              }}
-              className="px-3 py-1.5 rounded-full border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition"
-            >
-              🔄 Rafraîchir les cours
-            </button>
+            {/* Bouton "Rafraîchir les cours" supprimé */}
           </div>
         </header>
 
         {/* CONTENT */}
-        <div className="flex-1 p-6 overflow-y-auto space-y-6">
+        <motion.div
+          className="flex-1 p-6 overflow-y-auto space-y-6"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+        >
           {loading ? (
-            <div className="flex items-center justify-center h-full text-sm text-gray-500">
-              Chargement du portefeuille…
+            <div className="flex flex-col items-center justify-center h-full text-sm text-gray-500 gap-3">
+              <div className="h-8 w-8 rounded-full border-2 border-gray-200 border-t-[#D4AF37] animate-spin" />
+              <span>Chargement du portefeuille…</span>
             </div>
           ) : (
             <>
               {/* KPIs */}
               <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <KpiCard
-                  label="Valeur totale"
-                  value={totalValueDisplay}
-                  subtitle="Somme de tous vos comptes"
-                />
-                <KpiCard
-                  label="Variation jour"
-                  value={`${summary.dailyChangePct > 0 ? "+" : ""}${
-                    summary.dailyChangePct
-                  } %`}
-                  positive={summary.dailyChangePct >= 0}
-                  subtitle="Depuis la clôture veille"
-                />
-                <KpiCard
-                  label="Variation 30 jours"
-                  value={`${summary.monthlyChangePct > 0 ? "+" : ""}${
-                    summary.monthlyChangePct
-                  } %`}
-                  positive={summary.monthlyChangePct >= 0}
-                  subtitle="Sur les 30 derniers jours"
-                />
-                <KpiCard
-                  label="Comptes & lignes"
-                  value={`${summary.nbAccounts} comptes`}
-                  subtitle={`${summary.nbHoldings} placements`}
-                />
+                {[
+                  {
+                    label: "Valeur totale",
+                    value: totalValueDisplay,
+                    subtitle: "Somme de tous vos comptes",
+                  },
+                  {
+                    label: "Variation jour",
+                    value: `${summary.dailyChangePct > 0 ? "+" : ""}${
+                      summary.dailyChangePct
+                    } %`,
+                    subtitle: "Depuis la clôture veille",
+                    positive: summary.dailyChangePct >= 0,
+                  },
+                  {
+                    label: "Variation 30 jours",
+                    value: `${
+                      summary.monthlyChangePct > 0 ? "+" : ""
+                    }${summary.monthlyChangePct} %`,
+                    subtitle: "Sur les 30 derniers jours",
+                    positive: summary.monthlyChangePct >= 0,
+                  },
+                  {
+                    label: "Comptes & lignes",
+                    value: `${summary.nbAccounts} comptes`,
+                    subtitle: `${summary.nbHoldings} placements`,
+                  },
+                ].map((item, index) => (
+                  <motion.div
+                    key={item.label}
+                    custom={index}
+                    variants={kpiVariants}
+                    initial="hidden"
+                    animate="show"
+                  >
+                    <KpiCard
+                      label={item.label}
+                      value={item.value}
+                      subtitle={item.subtitle}
+                      positive={item.positive}
+                    />
+                  </motion.div>
+                ))}
               </section>
 
               {/* Répartition + légende */}
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Graphique placeholder */}
+                {/* Camembert */}
                 <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
                   <div className="flex items-center justify-between mb-4">
                     <div>
@@ -510,13 +584,46 @@ export default function Portfolio() {
                       </p>
                     </div>
                     <span className="px-2 py-1 rounded-full bg-gray-100 text-xs text-gray-500">
-                      Bientôt : graphique Chart.js
+                      Camembert basé sur vos allocations
                     </span>
                   </div>
                   <div className="flex-1 flex items-center justify-center">
-                    <div className="h-40 w-40 rounded-full border-4 border-dashed border-gray-200 flex items-center justify-center text-xs text-gray-400 text-center px-4">
-                      Zone pour le camembert (Chart.js)
-                    </div>
+                    {hasAllocations ? (
+                      <motion.div
+                        className="relative h-56 w-56"
+                        whileHover={{ scale: 1.03 }}
+                        transition={{
+                          type: "spring",
+                          stiffness: 200,
+                          damping: 15,
+                        }}
+                      >
+                        {/* halo */}
+                        <div className="absolute inset-4 rounded-full bg-[radial-gradient(circle_at_30%_0,#D4AF37_0,#F9FAFB_40%,#E5E7EB_80%)] opacity-30 blur-md" />
+
+                        {/* graphe */}
+                        <div className="relative h-full w-full bg-white rounded-full">
+                          <Doughnut
+                            data={doughnutData}
+                            options={doughnutOptions}
+                          />
+                        </div>
+
+                        {/* valeur totale au centre */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                          <span className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
+                            Total
+                          </span>
+                          <span className="text-sm font-semibold text-[#111827]">
+                            {totalValueDisplay}
+                          </span>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <div className="h-40 w-40 rounded-full border-4 border-dashed border-gray-200 flex items-center justify-center text-xs text-gray-400 text-center px-4">
+                        Aucune donnée suffisante pour afficher la répartition.
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -572,8 +679,22 @@ export default function Portfolio() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button className="px-3 py-1.5 rounded-full border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition">
-                      ➕ Ajouter un placement
+                    <button
+                      onClick={() => navigate("/accounts")}
+                      className="
+                        flex items-center gap-2 px-4 py-2
+                        rounded-full border border-gray-300
+                        text-xs font-medium text-gray-700
+                        bg-white hover:bg-[#F9F4E8]
+                        hover:border-[#D4AF37] hover:text-[#D4AF37]
+                        transition-all duration-300
+                        shadow-sm hover:shadow-md
+                      "
+                    >
+                      <span className="text-[#D4AF37] text-lg leading-none">
+                        ＋
+                      </span>
+                      Ajouter un placement
                     </button>
                   </div>
                 </div>
@@ -609,25 +730,30 @@ export default function Portfolio() {
                             colSpan={6}
                             className="py-6 text-center text-xs text-gray-400"
                           >
-                            Aucun placement pour le moment. Ajoutez une
-                            première ligne pour voir votre portefeuille se
-                            construire.
+                            Aucun placement pour le moment. Ajoutez une première
+                            ligne pour voir votre portefeuille se construire.
                           </td>
                         </tr>
                       ) : (
-                        holdings.map((h) => (
-                          <tr
+                        holdings.map((h, index) => (
+                          <motion.tr
                             key={h.id}
-                            className="border-b border-gray-50 hover:bg-gray-50/60 transition"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.02 * index, duration: 0.2 }}
+                            className="group border-b border-gray-50 hover:bg-gray-50/60 transition"
                           >
                             <td className="py-2 pr-4">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-medium text-gray-800">
-                                  {h.name}
-                                </span>
-                                <span className="text-[11px] text-gray-400">
-                                  {h.ticker}
-                                </span>
+                              <div className="flex items-stretch">
+                                <div className="w-1 rounded-r-full bg-transparent group-hover:bg-[#D4AF37] transition-all" />
+                                <div className="pl-2 flex flex-col">
+                                  <span className="text-sm font-medium text-gray-800">
+                                    {h.name}
+                                  </span>
+                                  <span className="text-[11px] text-gray-400">
+                                    {h.ticker}
+                                  </span>
+                                </div>
                               </div>
                             </td>
                             <td className="py-2 pr-4 text-xs text-gray-600">
@@ -656,7 +782,7 @@ export default function Portfolio() {
                             <td className="py-2 pr-0 text-right text-xs text-gray-700">
                               {h.allocationPct} %
                             </td>
-                          </tr>
+                          </motion.tr>
                         ))
                       )}
                     </tbody>
@@ -671,7 +797,7 @@ export default function Portfolio() {
               </section>
             </>
           )}
-        </div>
+        </motion.div>
       </main>
     </div>
   );
@@ -697,7 +823,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
 // 📌 Petite card KPI
 function KpiCard({ label, value, subtitle, positive }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 flex flex-col justify-between">
+    <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 flex flex-col justify-between transition-transform transition-shadow duration-200 hover:shadow-[0_12px_30px_rgba(15,16,19,0.12)] hover:-translate-y-[2px]">
       <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400 mb-1">
         {label}
       </p>
