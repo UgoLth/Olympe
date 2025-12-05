@@ -75,13 +75,13 @@ export default function Dashboard() {
             onClick={() => navigate("/accounts")}
           />
 
+          {/* 🔥 Ici : redirection vers /analyse */}
           <SidebarItem
             icon={BarChart3}
             label="Analyse"
             onClick={() => navigate("/analyse")}
           />
 
-          {/* ✅ Correction ici */}
           <SidebarItem
             icon={PieChart}
             label="Portefeuille"
@@ -147,7 +147,7 @@ export default function Dashboard() {
   );
 }
 
-// 🔧 SidebarItem corrigé (bug Tailwind fixé)
+// 🔧 SidebarItem
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
