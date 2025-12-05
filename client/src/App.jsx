@@ -8,6 +8,7 @@ import Accounts from "./pages/Accounts";
 import FinnhubTest from "./pages/FinnhubTest";
 import AccountHoldings from "./pages/AccountHoldings";
 import Portfolio from "./pages/Portfolio";
+import Analyse from "./pages/Analyse";
 
 
 function App() {
@@ -32,6 +33,8 @@ function App() {
         <Route path="/accounts/:accountId/holdings" element={<AccountHoldings />} />
 
         <Route path="/portefeuille" element={<Portfolio />} />
+
+        <Route path="/analyse" element={<Analyse />} />
 
 
 
