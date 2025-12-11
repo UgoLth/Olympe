@@ -9,7 +9,7 @@ import FinnhubTest from "./pages/FinnhubTest";
 import AccountHoldings from "./pages/AccountHoldings";
 import Portfolio from "./pages/Portfolio";
 import Analyse from "./pages/Analyse";
-
+import Simulation from "./pages/Simulation";
 
 function App() {
   return (
@@ -35,6 +35,8 @@ function App() {
         <Route path="/portefeuille" element={<Portfolio />} />
 
         <Route path="/analyse" element={<Analyse />} />
+
+        <Route path="/simulation" element={<Simulation />} />
 
 
 
