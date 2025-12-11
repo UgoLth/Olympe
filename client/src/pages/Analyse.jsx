@@ -51,34 +51,22 @@ const computeReturnPct = (current, reference) => {
   return Number.isFinite(value) ? value : 0;
 };
 
-// Même logique que dans Portfolio
-const categorizePosition = (accountType, assetClass) => {
+// 🎨 Palette sans bleu ni orange pour les classes d'actifs
+const palette = {
+  Liquidités: "#111827", // noir très foncé
+  Épargne: "#D4AF37", // or
+  Investissements: "#4B5563", // gris foncé
+  Crypto: "#9CA3AF", // gris clair
+  Autres: "#6B7280", // gris moyen
+};
+
+// 🔹 Catégorisation pour le CAMEMBERT (classe d'actifs = contenu)
+const categorizeAssetAllocation = (accountType, assetClass) => {
   const norm = (s) => (s || "").toLowerCase();
-
-  const t = norm(accountType);
   const a = norm(assetClass);
+  const t = norm(accountType);
 
-  if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
-    return "Liquidités";
-  }
-  if (
-    t.includes("epargne") ||
-    t.includes("épargne") ||
-    t.includes("livret") ||
-    t.includes("savings")
-  ) {
-    return "Épargne";
-  }
-  if (
-    t.includes("invest") ||
-    t.includes("bourse") ||
-    t.includes("ct") ||
-    t.includes("pea") ||
-    t.includes("broker")
-  ) {
-    return "Investissements";
-  }
-
+  // 1) On privilégie d'abord la classe d'actif de l'instrument
   if (a.includes("crypto")) return "Crypto";
   if (a.includes("cash")) return "Liquidités";
   if (
@@ -86,11 +74,17 @@ const categorizePosition = (accountType, assetClass) => {
     a.includes("stock") ||
     a.includes("etf") ||
     a.includes("fund")
-  )
+  ) {
     return "Investissements";
+  }
 
-  return "Autres";
-};
+  // 2) Fallback quand asset_class est vide : on se base sur le type de compte
+  if (t.includes("epargne") || t.includes("épargne") || t.includes("saving") || t.includes("livret")) {
+    return "Épargne";
+  }
+  if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
+    return "Liquidités";
+  }
 
 // 🎨 Palette sans bleu ni orange
 const palette = {
@@ -101,7 +95,7 @@ const palette = {
   Autres: "#6B7280", // gris moyen
 };
 
-// Traduction des labels de type de compte
+// Traduction des labels de type de compte (pour la carte de DROITE = contenant)
 const translateAccountTypeLabel = (label) => {
   const l = (label || "").toLowerCase();
 
@@ -675,20 +669,22 @@ export default function Analyse() {
           totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
-      // -------- CAMEMBERT PAR CATÉGORIE ----------
+      // -------- CAMEMBERT PAR CLASSE D'ACTIFS (contenu) ----------
       const categoryTotals = {};
       const addToCategory = (label, amount) => {
         if (!categoryTotals[label]) categoryTotals[label] = 0;
         categoryTotals[label] += amount;
       };
 
+      // Valeur des holdings par classe d'actifs (basée surtout sur asset_class)
       holdingsWithAllocation.forEach((h) => {
-        const label = categorizePosition(h.accountType, h.assetClass);
+        const label = categorizeAssetAllocation(h.accountType, h.assetClass);
         addToCategory(label, h.value);
       });
 
+      // Valeur des comptes sans holdings (on les classe par type de compte)
       standaloneAccounts.forEach((a) => {
-        const label = categorizePosition(a.type, null);
+        const label = categorizeAssetAllocation(a.type, null);
         addToCategory(label, toNumber(a.current_amount));
       });
 
@@ -703,7 +699,7 @@ export default function Analyse() {
         })
       );
 
-      // -------- RÉPARTITION PAR TYPE DE COMPTE ----------
+      // -------- RÉPARTITION PAR TYPE DE COMPTE (contenant) ----------
       const accountValueMap = {};
       (accounts || []).forEach((a) => {
         accountValueMap[a.id] = 0;
