@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -86,7 +86,13 @@ const categorizeAssetAllocation = (accountType, assetClass) => {
     return "Liquidités";
   }
 
-  return "Autres";
+// 🎨 Palette sans bleu ni orange
+const palette = {
+  Liquidités: "#111827", // noir très foncé
+  Épargne: "#D4AF37", // or
+  Investissements: "#4B5563", // gris foncé
+  Crypto: "#9CA3AF", // gris clair
+  Autres: "#6B7280", // gris moyen
 };
 
 // Traduction des labels de type de compte (pour la carte de DROITE = contenant)
@@ -108,6 +114,15 @@ const translateAccountTypeLabel = (label) => {
 const formatDateShort = (d) => {
   if (!(d instanceof Date)) d = new Date(d);
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+};
+
+// clef de jour en local (YYYY-MM-DD)
+const dayKey = (d) => {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = (dt.getMonth() + 1).toString().padStart(2, "0");
+  const day = dt.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${day}`;
 };
 
 // Construit la série à afficher selon le mode choisi
@@ -269,6 +284,25 @@ export default function Analyse() {
   // 🔹 historique quotidien complet depuis création du compte
   const [portfolioHistory, setPortfolioHistory] = useState([]); // [{date, value}]
   const [historyMode, setHistoryMode] = useState("day"); // "day" | "week" | "month" | "year" | "all"
+  const [historyValueMode, setHistoryValueMode] = useState("value"); // "value" | "perf"
+
+  // 🔹 historique des prix par instrument pour la comparaison
+  const [instrumentHistoryMap, setInstrumentHistoryMap] = useState({});
+
+  // 🔹 holdings sélectionnées pour la comparaison
+  const [selectedHolding1, setSelectedHolding1] = useState("");
+  const [selectedHolding2, setSelectedHolding2] = useState("");
+
+  // 🔹 paramètres de comparaison
+  const [comparisonValueMode, setComparisonValueMode] = useState("value"); // "value" | "perf"
+  const [comparisonMode, setComparisonMode] = useState("all"); // "week" | "month" | "year" | "all" | "custom"
+  const [comparisonStartDate, setComparisonStartDate] = useState("");
+  const [comparisonEndDate, setComparisonEndDate] = useState("");
+
+  const sortedPortfolioHistory = useMemo(
+    () => [...portfolioHistory].sort((a, b) => a.date - b.date),
+    [portfolioHistory]
+  );
 
   // ---------- AUTH + INIT ----------
   useEffect(() => {
@@ -333,6 +367,8 @@ export default function Analyse() {
       let prev30dByInstrument = {};
       let prevYtdByInstrument = {};
       let historicalPricesByInstrument = {};
+
+      const HISTORY_PRICES_LIMIT = 200000; // lever la limite par défaut (1000) et couvrir tout l'historique
 
       if (instrumentIds.length > 0) {
         const now = new Date();
@@ -427,7 +463,8 @@ export default function Analyse() {
           .select("instrument_id, price, fetched_at")
           .in("instrument_id", instrumentIds)
           .gte("fetched_at", isoHistoryStart)
-          .order("fetched_at", { ascending: true });
+          .order("fetched_at", { ascending: true })
+          .range(0, HISTORY_PRICES_LIMIT - 1); // récupère tout l'historique (jusqu'à 200k)
 
         if (historyPrices) {
           for (const p of historyPrices) {
@@ -440,6 +477,39 @@ export default function Analyse() {
               price: toNumber(p.price),
             });
           }
+
+          // pour chaque instrument : ne garder qu'une quote par jour (la plus proche de 17h, sinon la plus récente du jour)
+          Object.keys(historicalPricesByInstrument).forEach((id) => {
+            const list = historicalPricesByInstrument[id];
+            const byDay = {};
+
+            list.forEach((entry) => {
+              const key = dayKey(entry.date);
+              const minutes = entry.date.getHours() * 60 + entry.date.getMinutes();
+              const distTo17h = Math.abs(minutes - 17 * 60);
+
+              if (!byDay[key]) {
+                byDay[key] = { ...entry, distTo17h };
+              } else {
+                const curr = byDay[key];
+                const currMinutes =
+                  curr.date.getHours() * 60 + curr.date.getMinutes();
+                const currDist = Math.abs(currMinutes - 17 * 60);
+
+                // on garde la quote la plus proche de 17h, et en cas d'égalité, la plus récente (date max)
+                if (
+                  distTo17h < currDist ||
+                  (distTo17h === currDist && entry.date > curr.date)
+                ) {
+                  byDay[key] = { ...entry, distTo17h };
+                }
+              }
+            });
+
+            historicalPricesByInstrument[id] = Object.values(byDay).sort(
+              (a, b) => a.date - b.date
+            );
+          });
         }
       }
 
@@ -488,6 +558,7 @@ export default function Analyse() {
           ytdChangePct,
           allocationPct: 0,
           assetClass: instrument.asset_class || null,
+          instrumentId: h.instrument_id, // 👈 pour la comparaison
         };
       });
 
@@ -523,6 +594,7 @@ export default function Analyse() {
 
         earliestAccountDate.setHours(0, 0, 0, 0);
 
+        // On démarre l'historique au plus tôt entre la création du compte
         const msPerDay = 24 * 60 * 60 * 1000;
         const daysDiff = Math.floor(
           (now.getTime() - earliestAccountDate.getTime()) / msPerDay
@@ -541,31 +613,40 @@ export default function Analyse() {
             if (!quantity || !h.instrument_id) return;
 
             const historyList =
-              (historicalPricesByInstrument &&
-                historicalPricesByInstrument[h.instrument_id]) ||
-              [];
+          (historicalPricesByInstrument &&
+            historicalPricesByInstrument[h.instrument_id]) ||
+          [];
 
-            let priceForDay = 0;
+          let priceForDay = null;
+          const isToday =
+            dayDate.toDateString() === new Date().toDateString();
 
-            if (historyList.length > 0) {
-              // dernière quote <= fin de la journée
-              for (let idx = historyList.length - 1; idx >= 0; idx--) {
-                if (historyList[idx].date <= dayDate) {
+          if (historyList.length > 0) {
+            // dernière quote <= fin de la journée
+            for (let idx = historyList.length - 1; idx >= 0; idx--) {
+              if (historyList[idx].date <= dayDate) {
                   priceForDay = historyList[idx].price;
                   break;
-                }
               }
-              // si rien avant : première quote connue
-              if (!priceForDay) {
-                priceForDay = historyList[0].price;
-              }
-            } else {
-              // fallback : current_price
-              priceForDay = toNumber(h.current_price);
             }
+            // si aucune quote avant cette date, on plaque la première connue
+            if (priceForDay === null) {
+              priceForDay = historyList[0].price;
+            }
+          } else {
+            // fallback : current_price
+            priceForDay = toNumber(h.current_price);
+          }
 
+          // si c'est aujourd'hui et qu'on n'a rien trouvé, on prend le current_price
+          if (priceForDay === null && isToday) {
+            priceForDay = toNumber(h.current_price);
+          }
+
+          if (priceForDay !== null && priceForDay !== undefined) {
             portfolioValueForDay += quantity * priceForDay;
-          });
+          }
+        });
 
           // Valeur des comptes "standalone" (épargne/cash)
           standaloneAccounts.forEach((a) => {
@@ -687,6 +768,8 @@ export default function Analyse() {
       setAssetAllocations(computedAllocations);
       setAccountTypeAllocations(computedAccountTypeAlloc);
       setPortfolioHistory(dailyHistory);
+      setInstrumentHistoryMap(historicalPricesByInstrument); // 👈 pour les comparaisons
+
       setSummary({
         totalValue,
         totalReturnPct,
@@ -758,6 +841,45 @@ export default function Analyse() {
     historyMode
   );
 
+// Vue en valeur (€) ou en performance (%)
+const performanceHistoryDisplay =
+  historyValueMode === "perf" && performanceHistoryData
+    ? {
+        ...performanceHistoryData,
+        datasets: performanceHistoryData.datasets.map((ds) => {
+            const base = ds.data && ds.data.length > 0 ? ds.data[0] : 0;
+            return {
+              ...ds,
+              label: "Performance (%)",
+              data: ds.data.map((v) => {
+                if (!base) return 0;
+                const pct = (v / base - 1) * 100;
+                return Math.round(pct * 100) / 100; // deux décimales pour voir les petits écarts
+              }),
+            };
+          }),
+        }
+      : performanceHistoryData;
+
+  // stats pour resserrer l'échelle Y
+  const performanceYStats = useMemo(() => {
+    const arr = performanceHistoryDisplay?.datasets?.[0]?.data || [];
+    if (!arr.length) return null;
+    const min = Math.min(...arr);
+    const max = Math.max(...arr);
+    const range = Math.max(max - min, 0);
+    const padding =
+      range === 0
+        ? historyValueMode === "perf"
+          ? 0.5
+          : Math.max(Math.abs(max), 1) * 0.01
+        : range * 0.2;
+    return {
+      suggestedMin: min - padding,
+      suggestedMax: max + padding,
+    };
+  }, [performanceHistoryDisplay, historyValueMode]);
+
   const historyModeLabel = {
     day: "Journalier",
     week: "Hebdomadaire",
@@ -794,26 +916,175 @@ export default function Analyse() {
           color: "rgba(209,213,219,0.5)",
           drawBorder: false,
         },
+        suggestedMin: performanceYStats?.suggestedMin,
+        suggestedMax: performanceYStats?.suggestedMax,
         ticks: {
           color: "#9CA3AF",
           font: { size: 11 },
           callback: (value) =>
-            new Intl.NumberFormat("fr-FR", {
-              style: "currency",
-              currency: "EUR",
-              maximumFractionDigits: 0,
-            }).format(value),
+            historyValueMode === "perf"
+              ? `${Number(value).toFixed(4)} %`
+              : new Intl.NumberFormat("fr-FR", {
+                  style: "currency",
+                  currency: "EUR",
+                  maximumFractionDigits: 4,
+                }).format(value),
         },
       },
     },
   };
 
-  // ---------- RISK (toujours mock, basé sur le portefeuille global) ----------
+  // ---------- ANALYSE DU RISQUE (calculs réels) ----------
+
+  // petit helper pour l'écart-type
+  const stdDev = (arr) => {
+    if (!arr || arr.length === 0) return 0;
+    const mean = arr.reduce((s, x) => s + x, 0) / arr.length;
+    const variance =
+      arr.reduce((s, x) => s + (x - mean) * (x - mean), 0) / arr.length;
+    return Math.sqrt(variance);
+  };
+
+  // 1) Volatilité : écart-type des rendements journaliers (%)
+  const sortedHistory = [...portfolioHistory].sort(
+    (a, b) => a.date - b.date
+  );
+  const dailyReturns = [];
+  for (let i = 1; i < sortedHistory.length; i++) {
+    const prev = sortedHistory[i - 1].value;
+    const curr = sortedHistory[i].value;
+    if (prev > 0) {
+      dailyReturns.push((curr / prev - 1) * 100);
+    }
+  }
+  const volatilityPct = stdDev(dailyReturns); // en %
+  let volatilityScore = 0;
+  if (volatilityPct === 0) {
+    volatilityScore = 0;
+  } else if (volatilityPct < 0.5) {
+    volatilityScore = 1;
+  } else if (volatilityPct < 1) {
+    volatilityScore = 2;
+  } else if (volatilityPct < 1.5) {
+    volatilityScore = 3;
+  } else if (volatilityPct < 2.5) {
+    volatilityScore = 4;
+  } else {
+    volatilityScore = 5;
+  }
+  const volatilityLabel =
+    volatilityScore <= 2
+      ? "Volatilité faible"
+      : volatilityScore === 3
+      ? "Volatilité moyenne"
+      : "Volatilité élevée";
+
+  // 2) Max drawdown : plus grosse baisse entre un plus haut et le creux suivant
+  let maxDrawdown = 0; // en %
+  if (sortedHistory.length > 0) {
+    let peak = sortedHistory[0].value;
+    for (let i = 1; i < sortedHistory.length; i++) {
+      const v = sortedHistory[i].value;
+      if (v > peak) peak = v;
+      const dd = (v / peak - 1) * 100; // négatif en cas de baisse
+      if (dd < maxDrawdown) maxDrawdown = dd;
+    }
+  }
+  const maxDrawdownPct = Math.round(maxDrawdown * 10) / 10;
+
+  // 3) Diversification : basé sur le poids de la plus grosse ligne
+  const maxWeightPct =
+    holdings.length > 0
+      ? holdings.reduce(
+          (m, h) => (h.allocationPct > m ? h.allocationPct : m),
+          0
+        )
+      : 0;
+  let diversificationScore = 0;
+  if (maxWeightPct === 0) {
+    diversificationScore = 0;
+  } else if (maxWeightPct > 60) {
+    diversificationScore = 1;
+  } else if (maxWeightPct > 40) {
+    diversificationScore = 2;
+  } else if (maxWeightPct > 25) {
+    diversificationScore = 3;
+  } else if (maxWeightPct > 15) {
+    diversificationScore = 4;
+  } else {
+    diversificationScore = 5;
+  }
+  const diversificationLabel =
+    diversificationScore <= 2
+      ? "Portefeuille peu diversifié"
+      : diversificationScore === 3
+      ? "Portefeuille moyennement diversifié"
+      : "Portefeuille bien diversifié";
+
+  // 4) Liquidité : % de liquidités dans le donut
+  const cashEntry =
+    assetAllocations.find((a) => a.label === "Liquidités") || null;
+  const cashPct = cashEntry ? cashEntry.percent : 0;
+  let liquidityScore = 0;
+  if (cashPct === 0) {
+    liquidityScore = 0;
+  } else if (cashPct < 5) {
+    liquidityScore = 2; // très peu de cash
+  } else if (cashPct < 20) {
+    liquidityScore = 4;
+  } else if (cashPct < 50) {
+    liquidityScore = 5;
+  } else {
+    liquidityScore = 3; // beaucoup de cash -> très liquide mais peu investi
+  }
+
+  // 5) Horizon long terme : % d'investissements
+  const investEntry =
+    assetAllocations.find((a) => a.label === "Investissements") || null;
+  const investPct = investEntry ? investEntry.percent : 0;
+  let horizonScore = 0;
+  if (investPct === 0) {
+    horizonScore = 0;
+  } else if (investPct < 20) {
+    horizonScore = 2;
+  } else if (investPct < 50) {
+    horizonScore = 3;
+  } else if (investPct < 80) {
+    horizonScore = 4;
+  } else {
+    horizonScore = 5;
+  }
+
+  // 6) Niveau de risque global (mélange volatilité + drawdown)
+  const ddSeverity =
+    maxDrawdownPct === 0
+      ? 1
+      : Math.abs(maxDrawdownPct) > 25
+      ? 5
+      : Math.abs(maxDrawdownPct) > 15
+      ? 4
+      : Math.abs(maxDrawdownPct) > 8
+      ? 3
+      : 2;
+
+  const riskLevelScore = (volatilityScore + ddSeverity) / 2 || 0;
+
+  let globalLabel = "Risque indéterminé";
+  if (riskLevelScore <= 2) {
+    globalLabel = "Risque faible";
+  } else if (riskLevelScore <= 3) {
+    globalLabel = "Risque modéré";
+  } else if (riskLevelScore <= 4) {
+    globalLabel = "Risque dynamique";
+  } else {
+    globalLabel = "Risque élevé";
+  }
+
   const riskProfile = {
-    globalLabel: "Risque modéré",
-    volatilityLabel: "Volatilité moyenne",
-    maxDrawdownPct: -6.7,
-    diversificationLabel: "Portefeuille bien diversifié",
+    globalLabel,
+    volatilityLabel,
+    maxDrawdownPct,
+    diversificationLabel,
   };
 
   const riskRadarData = {
@@ -821,7 +1092,12 @@ export default function Analyse() {
     datasets: [
       {
         label: "Profil de risque",
-        data: [3, 4, 3, 4],
+        data: [
+          volatilityScore,
+          diversificationScore,
+          liquidityScore,
+          horizonScore,
+        ],
         borderColor: "#D4AF37",
         backgroundColor: "rgba(212,175,55,0.16)",
         borderWidth: 2,
@@ -893,6 +1169,215 @@ export default function Analyse() {
           null
         )
       : null;
+
+  // ---------- COMPARAISON DE LIGNES ----------
+
+  // helper : construit la série de valeur pour une holding à partir d'une liste de dates
+  const buildHoldingSeriesForComparison = (holding, basePoints) => {
+    if (!holding || !basePoints || !basePoints.length) return null;
+    if (!holding.instrumentId) return null;
+
+    const priceHistory = instrumentHistoryMap[holding.instrumentId];
+    if (!priceHistory || !priceHistory.length) return null;
+
+    const sortedPriceHistory = [...priceHistory].sort(
+      (a, b) => a.date - b.date
+    );
+
+    const data = [];
+    let j = 0;
+    let lastPrice = sortedPriceHistory[0].price;
+
+    basePoints.forEach((point) => {
+      const dayDate = point.date;
+
+      while (
+        j < sortedPriceHistory.length &&
+        sortedPriceHistory[j].date <= dayDate
+      ) {
+        lastPrice = sortedPriceHistory[j].price;
+        j++;
+      }
+
+      data.push(holding.quantity * lastPrice);
+    });
+
+    return data;
+  };
+
+  // 1) Construire la liste de dates utilisée pour la comparaison
+  let comparisonPoints = sortedPortfolioHistory;
+
+  if (sortedPortfolioHistory.length > 0) {
+    if (comparisonMode === "week") {
+      const last =
+        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const start = new Date(last);
+      start.setDate(start.getDate() - 6); // 7 jours glissants
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
+    } else if (comparisonMode === "month") {
+      const last =
+        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const start = new Date(last);
+      start.setDate(start.getDate() - 29); // 30 jours glissants
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
+    } else if (comparisonMode === "year") {
+      const last =
+        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const start = new Date(last);
+      start.setDate(start.getDate() - 364); // ~1 an
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
+    } else if (comparisonMode === "custom") {
+      const start = comparisonStartDate ? new Date(comparisonStartDate) : null;
+      const end = comparisonEndDate ? new Date(comparisonEndDate) : null;
+      comparisonPoints = sortedPortfolioHistory.filter((p) => {
+        const d = p.date;
+        if (start && d < start) return false;
+        if (end && d > end) return false;
+        return true;
+      });
+    } else {
+      // "all"
+      comparisonPoints = sortedPortfolioHistory;
+    }
+  }
+
+  const comparisonLabels = comparisonPoints.map((p) =>
+    formatDateShort(p.date)
+  );
+
+  const selectedObj1 = holdings.find(
+    (h) => String(h.id) === String(selectedHolding1)
+  );
+  const selectedObj2 = holdings.find(
+    (h) => String(h.id) === String(selectedHolding2)
+  );
+
+  // 2) Séries en VALEUR €
+  const series1Raw = selectedObj1
+    ? buildHoldingSeriesForComparison(selectedObj1, comparisonPoints)
+    : null;
+  const series2Raw = selectedObj2
+    ? buildHoldingSeriesForComparison(selectedObj2, comparisonPoints)
+    : null;
+
+  // 3) Option : normaliser en PERFORMANCE % depuis le 1er point
+  const normalizeToPerf = (series) => {
+    if (!series || !series.length) return null;
+    const base = series[0];
+    if (!base || base <= 0) return null;
+    return series.map((v) => ((v / base - 1) * 100));
+  };
+
+  const series1 =
+    comparisonValueMode === "value" ? series1Raw : normalizeToPerf(series1Raw);
+  const series2 =
+    comparisonValueMode === "value" ? series2Raw : normalizeToPerf(series2Raw);
+
+  const comparisonData =
+    (series1 && series1.length) || (series2 && series2.length)
+      ? {
+          labels: comparisonLabels,
+          datasets: [
+            ...(series1
+              ? [
+                  {
+                    label: selectedObj1 ? selectedObj1.name : "Ligne 1",
+                    data: series1,
+                    tension: 0.35,
+                    fill: false,
+                    borderWidth: 2,
+                    borderColor: "#D4AF37",
+                    pointRadius: 0,
+                  },
+                ]
+              : []),
+            ...(series2
+              ? [
+                  {
+                    label: selectedObj2 ? selectedObj2.name : "Ligne 2",
+                    data: series2,
+                    tension: 0.35,
+                    fill: false,
+                    borderWidth: 2,
+                    borderColor: "#4B5563",
+                    pointRadius: 0,
+                  },
+                ]
+              : []),
+          ],
+        }
+      : null;
+
+  const comparisonOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: "bottom",
+        labels: {
+          boxWidth: 12,
+          color: "#4B5563",
+          font: { size: 11 },
+        },
+      },
+      tooltip: {
+        backgroundColor: "#0F1013",
+        titleColor: "#F9FAFB",
+        bodyColor: "#E5E7EB",
+        padding: 10,
+        cornerRadius: 12,
+        callbacks: {
+          label: (ctx) => {
+            const v = ctx.parsed.y;
+            if (comparisonValueMode === "value") {
+              return `${ctx.dataset.label}: ${formatCurrency(v)}`;
+            } else {
+              return `${ctx.dataset.label}: ${v.toFixed(1)} %`;
+            }
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          color: "#9CA3AF",
+          font: { size: 11 },
+          maxRotation: 0,
+          autoSkipPadding: 10,
+        },
+      },
+      y: {
+        grid: {
+          color: "rgba(209,213,219,0.5)",
+          drawBorder: false,
+        },
+        ticks: {
+          color: "#9CA3AF",
+          font: { size: 11 },
+          callback: (value) => {
+            if (comparisonValueMode === "value") {
+              return new Intl.NumberFormat("fr-FR", {
+                style: "currency",
+                currency: "EUR",
+                maximumFractionDigits: 0,
+              }).format(value);
+            }
+            return `${value} %`;
+          },
+        },
+      },
+    },
+  };
 
   // Variants pour les KPI (stagger)
   const kpiVariants = {
@@ -1065,27 +1550,49 @@ export default function Analyse() {
                       </p>
                     </div>
 
-                    {/* Toggle de période */}
-                    <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
-                      {[
-                        { id: "day", label: "Jour" },
-                        { id: "week", label: "Semaine" },
-                        { id: "month", label: "Mois" },
-                        { id: "year", label: "Année" },
-                        { id: "all", label: "Depuis le début" },
-                      ].map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => setHistoryMode(m.id)}
-                          className={`px-2.5 py-1 rounded-full transition text-[11px] ${
-                            historyMode === m.id
-                              ? "bg-white shadow-sm text-gray-900"
-                              : "text-gray-500 hover:text-gray-900"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
+                    <div className="flex flex-col sm:flex-row items-end gap-2">
+                      {/* Toggle de période */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                        {[
+                          { id: "day", label: "Jour" },
+                          { id: "week", label: "Semaine" },
+                          { id: "month", label: "Mois" },
+                          { id: "year", label: "Année" },
+                          { id: "all", label: "Depuis le début" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setHistoryMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                              historyMode === m.id
+                                ? "bg-white shadow-sm text-gray-900"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Toggle valeur / performance */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                        {[
+                          { id: "value", label: "Valeur (€)" },
+                          { id: "perf", label: "Performance (%)" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setHistoryValueMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                              historyValueMode === m.id
+                                ? "bg-white shadow-sm text-gray-900"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -1095,7 +1602,7 @@ export default function Analyse() {
                     <div className="relative h-full">
                       {performanceHistoryData ? (
                         <Line
-                          data={performanceHistoryData}
+                          data={performanceHistoryDisplay}
                           options={performanceHistoryOptions}
                         />
                       ) : (
@@ -1158,6 +1665,160 @@ export default function Analyse() {
                     enregistrés dans Olympe et sont fournies à titre
                     exclusivement pédagogique.
                   </p>
+                </div>
+              </section>
+
+              {/* 2️⃣.bis Comparaison de lignes */}
+              <section className="bg-white rounded-2xl border border-gray-200 p-5">
+                <div className="flex flex-col gap-4 mb-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                      <h2 className="text-sm font-semibold text-gray-800">
+                        Comparer deux placements
+                      </h2>
+                      <p className="text-xs text-gray-500">
+                        Visualisez l’évolution de la valeur ou de la
+                        performance de chaque ligne.
+                      </p>
+                    </div>
+
+                    {/* Sélection des 2 lignes */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-gray-500">
+                          Ligne 1
+                        </span>
+                        <select
+                          value={selectedHolding1}
+                          onChange={(e) => setSelectedHolding1(e.target.value)}
+                          className="text-xs border border-gray-200 rounded-full px-3 py-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                        >
+                          <option value="">Choisir un placement…</option>
+                          {holdings.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                              {h.ticker ? ` (${h.ticker})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-gray-500">
+                          Ligne 2 (optionnel)
+                        </span>
+                        <select
+                          value={selectedHolding2}
+                          onChange={(e) => setSelectedHolding2(e.target.value)}
+                          className="text-xs border border-gray-200 rounded-full px-3 py-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                        >
+                          <option value="">
+                            Aucune / comparer plus tard
+                          </option>
+                          {holdings.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                              {h.ticker ? ` (${h.ticker})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Toggle valeur / perf + période */}
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    {/* Valeur vs Perf */}
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-gray-500">Affichage :</span>
+                      <div className="flex items-center bg-gray-100 rounded-full p-1">
+                        <button
+                          onClick={() => setComparisonValueMode("value")}
+                          className={`px-3 py-1 rounded-full transition ${
+                            comparisonValueMode === "value"
+                              ? "bg-white shadow-sm text-gray-900"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          Valeur (€)
+                        </button>
+                        <button
+                          onClick={() => setComparisonValueMode("perf")}
+                          className={`px-3 py-1 rounded-full transition ${
+                            comparisonValueMode === "perf"
+                              ? "bg-white shadow-sm text-gray-900"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          Performance (%)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Période */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-[11px]">
+                      <span className="text-gray-500">Période :</span>
+                      <div className="flex items-center bg-gray-100 rounded-full p-1">
+                        {[
+                          { id: "week", label: "7 j" },
+                          { id: "month", label: "30 j" },
+                          { id: "year", label: "1 an" },
+                          { id: "all", label: "Tout" },
+                          { id: "custom", label: "Perso" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setComparisonMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition ${
+                              comparisonMode === m.id
+                                ? "bg-white shadow-sm text-gray-900"
+                                : "text-gray-500"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Dates personnalisées */}
+                      {comparisonMode === "custom" && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={comparisonStartDate}
+                            onChange={(e) => {
+                              setComparisonStartDate(e.target.value);
+                              setComparisonMode("custom");
+                            }}
+                            className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                          />
+                          <span className="text-gray-400">→</span>
+                          <input
+                            type="date"
+                            value={comparisonEndDate}
+                            onChange={(e) => {
+                              setComparisonEndDate(e.target.value);
+                              setComparisonMode("custom");
+                            }}
+                            className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-64">
+                  {comparisonData ? (
+                    <Line data={comparisonData} options={comparisonOptions} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-gray-400 text-center px-6">
+                      Sélectionnez au moins une ligne et une période pour
+                      afficher l’historique. En mode "Perso", vous pouvez
+                      choisir une plage précise (par exemple du 2023-03-01 au
+                      2023-05-31).
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -1272,9 +1933,6 @@ export default function Analyse() {
                         Indicateurs de synthèse sur votre portefeuille.
                       </p>
                     </div>
-                    <span className="px-2 py-1 rounded-full bg-gray-100 text-xs text-gray-500">
-                      Exemple pédagogique
-                    </span>
                   </div>
                   <div className="flex-1 h-56">
                     <Radar data={riskRadarData} options={riskRadarOptions} />
