@@ -2,9 +2,7 @@ name: update-returns
 
 on:
   schedule:
-    # Tous les jours à 3h du matin (heure UTC)
-    - cron: "0 3 * * *"
-  # Pour pouvoir le lancer à la main depuis l’onglet Actions
+    - cron: "0 3 * * *" # tous les jours à 3h
   workflow_dispatch:
 
 jobs:
@@ -14,7 +12,7 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} # optionnel, pas utilisé pour l’instant
+      # FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}  # tu peux le garder si tu l'utilises ailleurs
 
     steps:
       - name: Check out repo
@@ -27,7 +25,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install supabase-py yfinance python-dotenv
+          python -m pip install --upgrade pip
+          pip install "supabase>=2.0.0" yfinance python-dotenv
 
       - name: Run fetch_returns script
         run: |
