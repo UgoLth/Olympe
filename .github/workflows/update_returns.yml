@@ -1,27 +1,34 @@
-name: Update instrument returns
+name: update-returns
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # tous les jours à 03h00
-  workflow_dispatch: {}
+    # Tous les jours à 3h du matin (heure UTC)
+    - cron: "0 3 * * *"
+  # Pour pouvoir le lancer à la main depuis l’onglet Actions
+  workflow_dispatch:
 
 jobs:
   update-returns:
     runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} # optionnel, pas utilisé pour l’instant
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Check out repo
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install yfinance supabase
+        run: |
+          pip install supabase-py yfinance python-dotenv
 
       - name: Run fetch_returns script
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python scripts/fetch_returns.py
