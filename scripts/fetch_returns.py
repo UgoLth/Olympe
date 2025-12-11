@@ -4,7 +4,6 @@ import datetime as dt
 import yfinance as yf
 from supabase import create_client
 
-
 # --- Config Supabase depuis les variables d'environnement GitHub Actions ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -16,8 +15,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Période sur laquelle on calcule le CAGR
-YEARS = 5
+# Période sur laquelle on calcule le rendement (en années)
+# 👉 On passe maintenant sur 1 an
+YEARS = 1
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -25,6 +25,7 @@ def calculate_cagr(price_start: float, price_end: float, years: int) -> float | 
     """
     Calcule un rendement annuel composé (CAGR) à partir d'un prix de départ et d'un prix final.
     Retourne None si les données sont invalides.
+    Pour years = 1, cela revient à (price_end / price_start - 1).
     """
     if price_start <= 0 or years <= 0:
         return None
@@ -56,8 +57,8 @@ def get_instruments():
 def fetch_and_store_return(inst: dict):
     """
     Pour un instrument donné (id + symbol) :
-    - récupère les prix sur 5 ans via yfinance
-    - calcule le CAGR
+    - récupère les prix sur 1 an via yfinance
+    - calcule le rendement annuel (CAGR sur 1 an)
     - stocke le résultat dans `instrument_returns`
     """
     symbol = inst["symbol"]
@@ -66,13 +67,14 @@ def fetch_and_store_return(inst: dict):
     print(f"📈 Fetching prices for {symbol} ...")
 
     end = dt.datetime.utcnow()
+    # 1 an glissant (365 jours)
     start = end - dt.timedelta(days=365 * YEARS)
 
-    # progress=False pour éviter le bar de progression dans les logs GitHub Actions
+    # progress=False pour éviter la barre de progression dans les logs GitHub Actions
     data = yf.download(symbol, start=start, end=end, progress=False)
 
     if data.empty:
-        print(f"⚠ Aucun historique disponible pour {symbol}")
+        print(f"⚠ Aucun historique disponible pour {symbol} sur {YEARS} an(s).")
         return
 
     price_start = float(data["Close"].iloc[0])
@@ -80,20 +82,20 @@ def fetch_and_store_return(inst: dict):
 
     cagr = calculate_cagr(price_start, price_end, YEARS)
     if cagr is None:
-        print(f"⚠ Impossible de calculer le CAGR pour {symbol}")
+        print(f"⚠ Impossible de calculer le rendement pour {symbol}")
         return
 
     supabase.table("instrument_returns").upsert(
         {
             "instrument_id": iid,
-            "cagr": cagr,
-            "period_years": YEARS,
+            "cagr": cagr,                  # rendement annuel (sur 1 an ici)
+            "period_years": YEARS,         # = 1
             "source": "yfinance",
             "last_updated_at": dt.datetime.utcnow().isoformat(),
         }
     ).execute()
 
-    print(f"✔ {symbol} CAGR = {cagr * 100:.2f} %")
+    print(f"✔ {symbol} return ({YEARS} an) = {cagr * 100:.2f} %")
 
 
 # --- Entrée principale -------------------------------------------------------
