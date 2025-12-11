@@ -122,6 +122,15 @@ const formatDateShort = (d) => {
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 };
 
+// clef de jour en local (YYYY-MM-DD)
+const dayKey = (d) => {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = (dt.getMonth() + 1).toString().padStart(2, "0");
+  const day = dt.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
 // Construit la série à afficher selon le mode choisi
 // history = [{date: Date, value: number}]
 const buildHistoryDataset = (history, mode) => {
@@ -281,6 +290,7 @@ export default function Analyse() {
   // 🔹 historique quotidien complet depuis création du compte
   const [portfolioHistory, setPortfolioHistory] = useState([]); // [{date, value}]
   const [historyMode, setHistoryMode] = useState("day"); // "day" | "week" | "month" | "year" | "all"
+  const [historyValueMode, setHistoryValueMode] = useState("value"); // "value" | "perf"
 
   // 🔹 historique des prix par instrument pour la comparaison
   const [instrumentHistoryMap, setInstrumentHistoryMap] = useState({});
@@ -363,6 +373,8 @@ export default function Analyse() {
       let prev30dByInstrument = {};
       let prevYtdByInstrument = {};
       let historicalPricesByInstrument = {};
+
+      const HISTORY_PRICES_LIMIT = 200000; // lever la limite par défaut (1000) et couvrir tout l'historique
 
       if (instrumentIds.length > 0) {
         const now = new Date();
@@ -457,7 +469,8 @@ export default function Analyse() {
           .select("instrument_id, price, fetched_at")
           .in("instrument_id", instrumentIds)
           .gte("fetched_at", isoHistoryStart)
-          .order("fetched_at", { ascending: true });
+          .order("fetched_at", { ascending: true })
+          .range(0, HISTORY_PRICES_LIMIT - 1); // récupère tout l'historique (jusqu'à 200k)
 
         if (historyPrices) {
           for (const p of historyPrices) {
@@ -470,6 +483,39 @@ export default function Analyse() {
               price: toNumber(p.price),
             });
           }
+
+          // pour chaque instrument : ne garder qu'une quote par jour (la plus proche de 17h, sinon la plus récente du jour)
+          Object.keys(historicalPricesByInstrument).forEach((id) => {
+            const list = historicalPricesByInstrument[id];
+            const byDay = {};
+
+            list.forEach((entry) => {
+              const key = dayKey(entry.date);
+              const minutes = entry.date.getHours() * 60 + entry.date.getMinutes();
+              const distTo17h = Math.abs(minutes - 17 * 60);
+
+              if (!byDay[key]) {
+                byDay[key] = { ...entry, distTo17h };
+              } else {
+                const curr = byDay[key];
+                const currMinutes =
+                  curr.date.getHours() * 60 + curr.date.getMinutes();
+                const currDist = Math.abs(currMinutes - 17 * 60);
+
+                // on garde la quote la plus proche de 17h, et en cas d'égalité, la plus récente (date max)
+                if (
+                  distTo17h < currDist ||
+                  (distTo17h === currDist && entry.date > curr.date)
+                ) {
+                  byDay[key] = { ...entry, distTo17h };
+                }
+              }
+            });
+
+            historicalPricesByInstrument[id] = Object.values(byDay).sort(
+              (a, b) => a.date - b.date
+            );
+          });
         }
       }
 
@@ -554,6 +600,7 @@ export default function Analyse() {
 
         earliestAccountDate.setHours(0, 0, 0, 0);
 
+        // On démarre l'historique au plus tôt entre la création du compte
         const msPerDay = 24 * 60 * 60 * 1000;
         const daysDiff = Math.floor(
           (now.getTime() - earliestAccountDate.getTime()) / msPerDay
@@ -572,31 +619,40 @@ export default function Analyse() {
             if (!quantity || !h.instrument_id) return;
 
             const historyList =
-              (historicalPricesByInstrument &&
-                historicalPricesByInstrument[h.instrument_id]) ||
-              [];
+          (historicalPricesByInstrument &&
+            historicalPricesByInstrument[h.instrument_id]) ||
+          [];
 
-            let priceForDay = 0;
+          let priceForDay = null;
+          const isToday =
+            dayDate.toDateString() === new Date().toDateString();
 
-            if (historyList.length > 0) {
-              // dernière quote <= fin de la journée
-              for (let idx = historyList.length - 1; idx >= 0; idx--) {
-                if (historyList[idx].date <= dayDate) {
+          if (historyList.length > 0) {
+            // dernière quote <= fin de la journée
+            for (let idx = historyList.length - 1; idx >= 0; idx--) {
+              if (historyList[idx].date <= dayDate) {
                   priceForDay = historyList[idx].price;
                   break;
-                }
               }
-              // si rien avant : première quote connue
-              if (!priceForDay) {
-                priceForDay = historyList[0].price;
-              }
-            } else {
-              // fallback : current_price
-              priceForDay = toNumber(h.current_price);
             }
+            // si aucune quote avant cette date, on plaque la première connue
+            if (priceForDay === null) {
+              priceForDay = historyList[0].price;
+            }
+          } else {
+            // fallback : current_price
+            priceForDay = toNumber(h.current_price);
+          }
 
+          // si c'est aujourd'hui et qu'on n'a rien trouvé, on prend le current_price
+          if (priceForDay === null && isToday) {
+            priceForDay = toNumber(h.current_price);
+          }
+
+          if (priceForDay !== null && priceForDay !== undefined) {
             portfolioValueForDay += quantity * priceForDay;
-          });
+          }
+        });
 
           // Valeur des comptes "standalone" (épargne/cash)
           standaloneAccounts.forEach((a) => {
@@ -789,6 +845,45 @@ export default function Analyse() {
     historyMode
   );
 
+// Vue en valeur (€) ou en performance (%)
+const performanceHistoryDisplay =
+  historyValueMode === "perf" && performanceHistoryData
+    ? {
+        ...performanceHistoryData,
+        datasets: performanceHistoryData.datasets.map((ds) => {
+            const base = ds.data && ds.data.length > 0 ? ds.data[0] : 0;
+            return {
+              ...ds,
+              label: "Performance (%)",
+              data: ds.data.map((v) => {
+                if (!base) return 0;
+                const pct = (v / base - 1) * 100;
+                return Math.round(pct * 100) / 100; // deux décimales pour voir les petits écarts
+              }),
+            };
+          }),
+        }
+      : performanceHistoryData;
+
+  // stats pour resserrer l'échelle Y
+  const performanceYStats = useMemo(() => {
+    const arr = performanceHistoryDisplay?.datasets?.[0]?.data || [];
+    if (!arr.length) return null;
+    const min = Math.min(...arr);
+    const max = Math.max(...arr);
+    const range = Math.max(max - min, 0);
+    const padding =
+      range === 0
+        ? historyValueMode === "perf"
+          ? 0.5
+          : Math.max(Math.abs(max), 1) * 0.01
+        : range * 0.2;
+    return {
+      suggestedMin: min - padding,
+      suggestedMax: max + padding,
+    };
+  }, [performanceHistoryDisplay, historyValueMode]);
+
   const historyModeLabel = {
     day: "Journalier",
     week: "Hebdomadaire",
@@ -825,15 +920,19 @@ export default function Analyse() {
           color: "rgba(209,213,219,0.5)",
           drawBorder: false,
         },
+        suggestedMin: performanceYStats?.suggestedMin,
+        suggestedMax: performanceYStats?.suggestedMax,
         ticks: {
           color: "#9CA3AF",
           font: { size: 11 },
           callback: (value) =>
-            new Intl.NumberFormat("fr-FR", {
-              style: "currency",
-              currency: "EUR",
-              maximumFractionDigits: 0,
-            }).format(value),
+            historyValueMode === "perf"
+              ? `${Number(value).toFixed(4)} %`
+              : new Intl.NumberFormat("fr-FR", {
+                  style: "currency",
+                  currency: "EUR",
+                  maximumFractionDigits: 4,
+                }).format(value),
         },
       },
     },
@@ -1455,27 +1554,49 @@ export default function Analyse() {
                       </p>
                     </div>
 
-                    {/* Toggle de période */}
-                    <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
-                      {[
-                        { id: "day", label: "Jour" },
-                        { id: "week", label: "Semaine" },
-                        { id: "month", label: "Mois" },
-                        { id: "year", label: "Année" },
-                        { id: "all", label: "Depuis le début" },
-                      ].map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => setHistoryMode(m.id)}
-                          className={`px-2.5 py-1 rounded-full transition text-[11px] ${
-                            historyMode === m.id
-                              ? "bg-white shadow-sm text-gray-900"
-                              : "text-gray-500 hover:text-gray-900"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
+                    <div className="flex flex-col sm:flex-row items-end gap-2">
+                      {/* Toggle de période */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                        {[
+                          { id: "day", label: "Jour" },
+                          { id: "week", label: "Semaine" },
+                          { id: "month", label: "Mois" },
+                          { id: "year", label: "Année" },
+                          { id: "all", label: "Depuis le début" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setHistoryMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                              historyMode === m.id
+                                ? "bg-white shadow-sm text-gray-900"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Toggle valeur / performance */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                        {[
+                          { id: "value", label: "Valeur (€)" },
+                          { id: "perf", label: "Performance (%)" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setHistoryValueMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                              historyValueMode === m.id
+                                ? "bg-white shadow-sm text-gray-900"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -1485,7 +1606,7 @@ export default function Analyse() {
                     <div className="relative h-full">
                       {performanceHistoryData ? (
                         <Line
-                          data={performanceHistoryData}
+                          data={performanceHistoryDisplay}
                           options={performanceHistoryOptions}
                         />
                       ) : (
