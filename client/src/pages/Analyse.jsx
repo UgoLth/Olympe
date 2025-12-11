@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+﻿import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -51,22 +51,34 @@ const computeReturnPct = (current, reference) => {
   return Number.isFinite(value) ? value : 0;
 };
 
-// 🎨 Palette sans bleu ni orange pour les classes d'actifs
-const palette = {
-  Liquidités: "#111827", // noir très foncé
-  Épargne: "#D4AF37", // or
-  Investissements: "#4B5563", // gris foncé
-  Crypto: "#9CA3AF", // gris clair
-  Autres: "#6B7280", // gris moyen
-};
-
-// 🔹 Catégorisation pour le CAMEMBERT (classe d'actifs = contenu)
-const categorizeAssetAllocation = (accountType, assetClass) => {
+// Même logique que dans Portfolio
+const categorizePosition = (accountType, assetClass) => {
   const norm = (s) => (s || "").toLowerCase();
-  const a = norm(assetClass);
-  const t = norm(accountType);
 
-  // 1) On privilégie d'abord la classe d'actif de l'instrument
+  const t = norm(accountType);
+  const a = norm(assetClass);
+
+  if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
+    return "Liquidités";
+  }
+  if (
+    t.includes("epargne") ||
+    t.includes("épargne") ||
+    t.includes("livret") ||
+    t.includes("savings")
+  ) {
+    return "Épargne";
+  }
+  if (
+    t.includes("invest") ||
+    t.includes("bourse") ||
+    t.includes("ct") ||
+    t.includes("pea") ||
+    t.includes("broker")
+  ) {
+    return "Investissements";
+  }
+
   if (a.includes("crypto")) return "Crypto";
   if (a.includes("cash")) return "Liquidités";
   if (
@@ -74,17 +86,11 @@ const categorizeAssetAllocation = (accountType, assetClass) => {
     a.includes("stock") ||
     a.includes("etf") ||
     a.includes("fund")
-  ) {
+  )
     return "Investissements";
-  }
 
-  // 2) Fallback quand asset_class est vide : on se base sur le type de compte
-  if (t.includes("epargne") || t.includes("épargne") || t.includes("saving") || t.includes("livret")) {
-    return "Épargne";
-  }
-  if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
-    return "Liquidités";
-  }
+  return "Autres";
+};
 
 // 🎨 Palette sans bleu ni orange
 const palette = {
@@ -95,34 +101,12 @@ const palette = {
   Autres: "#6B7280", // gris moyen
 };
 
-// Traduction des labels de type de compte (pour la carte de DROITE = contenant)
-const translateAccountTypeLabel = (label) => {
-  const l = (label || "").toLowerCase();
-
-  if (l.includes("invest")) return "Investissement";
-  if (l.includes("saving") || l.includes("épargne") || l.includes("epargne"))
-    return "Épargne";
-  if (l.includes("cash") || l.includes("courant") || l.includes("current"))
-    return "Liquidités";
-
-  return label || "Autre";
-};
-
 // ---------- Helpers pour le graph ----------
 
 // format court JJ/MM
 const formatDateShort = (d) => {
   if (!(d instanceof Date)) d = new Date(d);
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
-};
-
-// clef de jour en local (YYYY-MM-DD)
-const dayKey = (d) => {
-  const dt = d instanceof Date ? d : new Date(d);
-  const y = dt.getFullYear();
-  const m = (dt.getMonth() + 1).toString().padStart(2, "0");
-  const day = dt.getDate().toString().padStart(2, "0");
-  return `${y}-${m}-${day}`;
 };
 
 // Construit la série à afficher selon le mode choisi
@@ -284,9 +268,8 @@ export default function Analyse() {
   // 🔹 historique quotidien complet depuis création du compte
   const [portfolioHistory, setPortfolioHistory] = useState([]); // [{date, value}]
   const [historyMode, setHistoryMode] = useState("day"); // "day" | "week" | "month" | "year" | "all"
-  const [historyValueMode, setHistoryValueMode] = useState("value"); // "value" | "perf"
 
-  // 🔹 historique des prix par instrument pour la comparaison
+  // 🔹 historique des prix par instrument pour la comparaison (1 point par jour)
   const [instrumentHistoryMap, setInstrumentHistoryMap] = useState({});
 
   // 🔹 holdings sélectionnées pour la comparaison
@@ -295,7 +278,7 @@ export default function Analyse() {
 
   // 🔹 paramètres de comparaison
   const [comparisonValueMode, setComparisonValueMode] = useState("value"); // "value" | "perf"
-  const [comparisonMode, setComparisonMode] = useState("all"); // "week" | "month" | "year" | "all" | "custom"
+  const [comparisonMode, setComparisonMode] = useState("week"); // "week" | "month" | "year" | "all" | "custom"
   const [comparisonStartDate, setComparisonStartDate] = useState("");
   const [comparisonEndDate, setComparisonEndDate] = useState("");
 
@@ -367,8 +350,6 @@ export default function Analyse() {
       let prev30dByInstrument = {};
       let prevYtdByInstrument = {};
       let historicalPricesByInstrument = {};
-
-      const HISTORY_PRICES_LIMIT = 200000; // lever la limite par défaut (1000) et couvrir tout l'historique
 
       if (instrumentIds.length > 0) {
         const now = new Date();
@@ -463,50 +444,39 @@ export default function Analyse() {
           .select("instrument_id, price, fetched_at")
           .in("instrument_id", instrumentIds)
           .gte("fetched_at", isoHistoryStart)
-          .order("fetched_at", { ascending: true })
-          .range(0, HISTORY_PRICES_LIMIT - 1); // récupère tout l'historique (jusqu'à 200k)
+          .order("fetched_at", { ascending: true });
 
-        if (historyPrices) {
+        if (historyPrices && historyPrices.length > 0) {
+          // 👉 Regroupement par instrument + jour : 1 "clôture" par jour
+          const perInstrumentPerDay = {};
+
           for (const p of historyPrices) {
             const id = p.instrument_id;
-            if (!historicalPricesByInstrument[id]) {
-              historicalPricesByInstrument[id] = [];
-            }
-            historicalPricesByInstrument[id].push({
-              date: new Date(p.fetched_at),
+            const d = new Date(p.fetched_at);
+            const dayKey = d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+            const key = `${id}_${dayKey}`;
+
+            // Les données sont triées asc, donc on garde la dernière quote du jour
+            perInstrumentPerDay[key] = {
+              instrumentId: id,
+              date: new Date(dayKey), // date normalisée au jour
               price: toNumber(p.price),
-            });
+            };
           }
 
-          // pour chaque instrument : ne garder qu'une quote par jour (la plus proche de 17h, sinon la plus récente du jour)
+          // On reconstruit historicalPricesByInstrument avec 1 point/jour
+          historicalPricesByInstrument = {};
+          Object.values(perInstrumentPerDay).forEach((row) => {
+            const { instrumentId, date, price } = row;
+            if (!historicalPricesByInstrument[instrumentId]) {
+              historicalPricesByInstrument[instrumentId] = [];
+            }
+            historicalPricesByInstrument[instrumentId].push({ date, price });
+          });
+
+          // On s'assure que chaque série est triée
           Object.keys(historicalPricesByInstrument).forEach((id) => {
-            const list = historicalPricesByInstrument[id];
-            const byDay = {};
-
-            list.forEach((entry) => {
-              const key = dayKey(entry.date);
-              const minutes = entry.date.getHours() * 60 + entry.date.getMinutes();
-              const distTo17h = Math.abs(minutes - 17 * 60);
-
-              if (!byDay[key]) {
-                byDay[key] = { ...entry, distTo17h };
-              } else {
-                const curr = byDay[key];
-                const currMinutes =
-                  curr.date.getHours() * 60 + curr.date.getMinutes();
-                const currDist = Math.abs(currMinutes - 17 * 60);
-
-                // on garde la quote la plus proche de 17h, et en cas d'égalité, la plus récente (date max)
-                if (
-                  distTo17h < currDist ||
-                  (distTo17h === currDist && entry.date > curr.date)
-                ) {
-                  byDay[key] = { ...entry, distTo17h };
-                }
-              }
-            });
-
-            historicalPricesByInstrument[id] = Object.values(byDay).sort(
+            historicalPricesByInstrument[id].sort(
               (a, b) => a.date - b.date
             );
           });
@@ -585,7 +555,7 @@ export default function Analyse() {
         standaloneAccounts.length > 0
       ) {
         const now = new Date();
-        now.setHours(23, 59, 59, 999);
+        now.setHours(0, 0, 0, 0); // on travaille en jours entiers
 
         const earliestAccountDate =
           accounts && accounts.length > 0
@@ -594,16 +564,34 @@ export default function Analyse() {
 
         earliestAccountDate.setHours(0, 0, 0, 0);
 
-        // On démarre l'historique au plus tôt entre la création du compte
         const msPerDay = 24 * 60 * 60 * 1000;
         const daysDiff = Math.floor(
           (now.getTime() - earliestAccountDate.getTime()) / msPerDay
         );
 
-        for (let offset = daysDiff; offset >= 0; offset--) {
-          const dayDate = new Date(now);
-          dayDate.setHours(23, 59, 59, 999);
-          dayDate.setDate(now.getDate() - offset);
+        // dernière valeur connue de chaque instrument
+        const lastKnownPriceByInstrument = {};
+
+        for (let offset = 0; offset <= daysDiff; offset++) {
+          const dayStart = new Date(
+            earliestAccountDate.getTime() + offset * msPerDay
+          );
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(dayStart);
+          dayEnd.setHours(23, 59, 59, 999);
+
+          const dayKey = dayStart.toISOString().slice(0, 10);
+
+          // on met à jour à partir des séries "1 point/jour"
+          (instrumentIds || []).forEach((instId) => {
+            const history = historicalPricesByInstrument[instId] || [];
+            const pointForDay = history.find(
+              (h) => h.date.toISOString().slice(0, 10) === dayKey
+            );
+            if (pointForDay) {
+              lastKnownPriceByInstrument[instId] = pointForDay.price;
+            }
+          });
 
           let portfolioValueForDay = 0;
 
@@ -612,41 +600,12 @@ export default function Analyse() {
             const quantity = toNumber(h.quantity);
             if (!quantity || !h.instrument_id) return;
 
-            const historyList =
-          (historicalPricesByInstrument &&
-            historicalPricesByInstrument[h.instrument_id]) ||
-          [];
+            const price =
+              lastKnownPriceByInstrument[h.instrument_id] ??
+              toNumber(h.current_price);
 
-          let priceForDay = null;
-          const isToday =
-            dayDate.toDateString() === new Date().toDateString();
-
-          if (historyList.length > 0) {
-            // dernière quote <= fin de la journée
-            for (let idx = historyList.length - 1; idx >= 0; idx--) {
-              if (historyList[idx].date <= dayDate) {
-                  priceForDay = historyList[idx].price;
-                  break;
-              }
-            }
-            // si aucune quote avant cette date, on plaque la première connue
-            if (priceForDay === null) {
-              priceForDay = historyList[0].price;
-            }
-          } else {
-            // fallback : current_price
-            priceForDay = toNumber(h.current_price);
-          }
-
-          // si c'est aujourd'hui et qu'on n'a rien trouvé, on prend le current_price
-          if (priceForDay === null && isToday) {
-            priceForDay = toNumber(h.current_price);
-          }
-
-          if (priceForDay !== null && priceForDay !== undefined) {
-            portfolioValueForDay += quantity * priceForDay;
-          }
-        });
+            portfolioValueForDay += quantity * price;
+          });
 
           // Valeur des comptes "standalone" (épargne/cash)
           standaloneAccounts.forEach((a) => {
@@ -654,7 +613,7 @@ export default function Analyse() {
           });
 
           dailyHistory.push({
-            date: new Date(dayDate),
+            date: dayEnd, // fin de journée
             value: portfolioValueForDay,
           });
         }
@@ -669,22 +628,20 @@ export default function Analyse() {
           totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
-      // -------- CAMEMBERT PAR CLASSE D'ACTIFS (contenu) ----------
+      // -------- CAMEMBERT PAR CATÉGORIE ----------
       const categoryTotals = {};
       const addToCategory = (label, amount) => {
         if (!categoryTotals[label]) categoryTotals[label] = 0;
         categoryTotals[label] += amount;
       };
 
-      // Valeur des holdings par classe d'actifs (basée surtout sur asset_class)
       holdingsWithAllocation.forEach((h) => {
-        const label = categorizeAssetAllocation(h.accountType, h.assetClass);
+        const label = categorizePosition(h.accountType, h.assetClass);
         addToCategory(label, h.value);
       });
 
-      // Valeur des comptes sans holdings (on les classe par type de compte)
       standaloneAccounts.forEach((a) => {
-        const label = categorizeAssetAllocation(a.type, null);
+        const label = categorizePosition(a.type, null);
         addToCategory(label, toNumber(a.current_amount));
       });
 
@@ -699,7 +656,7 @@ export default function Analyse() {
         })
       );
 
-      // -------- RÉPARTITION PAR TYPE DE COMPTE (contenant) ----------
+      // -------- RÉPARTITION PAR TYPE DE COMPTE ----------
       const accountValueMap = {};
       (accounts || []).forEach((a) => {
         accountValueMap[a.id] = 0;
@@ -841,45 +798,6 @@ export default function Analyse() {
     historyMode
   );
 
-// Vue en valeur (€) ou en performance (%)
-const performanceHistoryDisplay =
-  historyValueMode === "perf" && performanceHistoryData
-    ? {
-        ...performanceHistoryData,
-        datasets: performanceHistoryData.datasets.map((ds) => {
-            const base = ds.data && ds.data.length > 0 ? ds.data[0] : 0;
-            return {
-              ...ds,
-              label: "Performance (%)",
-              data: ds.data.map((v) => {
-                if (!base) return 0;
-                const pct = (v / base - 1) * 100;
-                return Math.round(pct * 100) / 100; // deux décimales pour voir les petits écarts
-              }),
-            };
-          }),
-        }
-      : performanceHistoryData;
-
-  // stats pour resserrer l'échelle Y
-  const performanceYStats = useMemo(() => {
-    const arr = performanceHistoryDisplay?.datasets?.[0]?.data || [];
-    if (!arr.length) return null;
-    const min = Math.min(...arr);
-    const max = Math.max(...arr);
-    const range = Math.max(max - min, 0);
-    const padding =
-      range === 0
-        ? historyValueMode === "perf"
-          ? 0.5
-          : Math.max(Math.abs(max), 1) * 0.01
-        : range * 0.2;
-    return {
-      suggestedMin: min - padding,
-      suggestedMax: max + padding,
-    };
-  }, [performanceHistoryDisplay, historyValueMode]);
-
   const historyModeLabel = {
     day: "Journalier",
     week: "Hebdomadaire",
@@ -916,19 +834,15 @@ const performanceHistoryDisplay =
           color: "rgba(209,213,219,0.5)",
           drawBorder: false,
         },
-        suggestedMin: performanceYStats?.suggestedMin,
-        suggestedMax: performanceYStats?.suggestedMax,
         ticks: {
           color: "#9CA3AF",
           font: { size: 11 },
           callback: (value) =>
-            historyValueMode === "perf"
-              ? `${Number(value).toFixed(4)} %`
-              : new Intl.NumberFormat("fr-FR", {
-                  style: "currency",
-                  currency: "EUR",
-                  maximumFractionDigits: 4,
-                }).format(value),
+            new Intl.NumberFormat("fr-FR", {
+              style: "currency",
+              currency: "EUR",
+              maximumFractionDigits: 0,
+            }).format(value),
         },
       },
     },
@@ -1141,6 +1055,7 @@ const performanceHistoryDisplay =
     .sort((a, b) => b.allocationPct - a.allocationPct)
     .slice(0, 5)
     .map((h) => ({
+      id: h.id,
       name: h.name,
       ticker: h.ticker,
       weightPct: h.allocationPct,
@@ -1189,6 +1104,7 @@ const performanceHistoryDisplay =
     let lastPrice = sortedPriceHistory[0].price;
 
     basePoints.forEach((point) => {
+      // on considère la fin de journée
       const dayDate = point.date;
 
       while (
@@ -1236,6 +1152,8 @@ const performanceHistoryDisplay =
     } else if (comparisonMode === "custom") {
       const start = comparisonStartDate ? new Date(comparisonStartDate) : null;
       const end = comparisonEndDate ? new Date(comparisonEndDate) : null;
+      if (start) start.setHours(0, 0, 0, 0);
+      if (end) end.setHours(23, 59, 59, 999);
       comparisonPoints = sortedPortfolioHistory.filter((p) => {
         const d = p.date;
         if (start && d < start) return false;
@@ -1272,7 +1190,7 @@ const performanceHistoryDisplay =
     if (!series || !series.length) return null;
     const base = series[0];
     if (!base || base <= 0) return null;
-    return series.map((v) => ((v / base - 1) * 100));
+    return series.map((v) => (v / base - 1) * 100);
   };
 
   const series1 =
@@ -1550,49 +1468,27 @@ const performanceHistoryDisplay =
                       </p>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-end gap-2">
-                      {/* Toggle de période */}
-                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
-                        {[
-                          { id: "day", label: "Jour" },
-                          { id: "week", label: "Semaine" },
-                          { id: "month", label: "Mois" },
-                          { id: "year", label: "Année" },
-                          { id: "all", label: "Depuis le début" },
-                        ].map((m) => (
-                          <button
-                            key={m.id}
-                            onClick={() => setHistoryMode(m.id)}
-                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
-                              historyMode === m.id
-                                ? "bg-white shadow-sm text-gray-900"
-                                : "text-gray-500 hover:text-gray-900"
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Toggle valeur / performance */}
-                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
-                        {[
-                          { id: "value", label: "Valeur (€)" },
-                          { id: "perf", label: "Performance (%)" },
-                        ].map((m) => (
-                          <button
-                            key={m.id}
-                            onClick={() => setHistoryValueMode(m.id)}
-                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
-                              historyValueMode === m.id
-                                ? "bg-white shadow-sm text-gray-900"
-                                : "text-gray-500 hover:text-gray-900"
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
+                    {/* Toggle de période */}
+                    <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                      {[
+                        { id: "day", label: "Jour" },
+                        { id: "week", label: "Semaine" },
+                        { id: "month", label: "Mois" },
+                        { id: "year", label: "Année" },
+                        { id: "all", label: "Depuis le début" },
+                      ].map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => setHistoryMode(m.id)}
+                          className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                            historyMode === m.id
+                              ? "bg-white shadow-sm text-gray-900"
+                              : "text-gray-500 hover:text-gray-900"
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -1602,7 +1498,7 @@ const performanceHistoryDisplay =
                     <div className="relative h-full">
                       {performanceHistoryData ? (
                         <Line
-                          data={performanceHistoryDisplay}
+                          data={performanceHistoryData}
                           options={performanceHistoryOptions}
                         />
                       ) : (
@@ -1756,7 +1652,7 @@ const performanceHistoryDisplay =
                     </div>
 
                     {/* Période */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-[11px]">
+                    <div className="flex items-center gap-2 text-[11px]">
                       <span className="text-gray-500">Période :</span>
                       <div className="flex items-center bg-gray-100 rounded-full p-1">
                         {[
@@ -1769,7 +1665,7 @@ const performanceHistoryDisplay =
                           <button
                             key={m.id}
                             onClick={() => setComparisonMode(m.id)}
-                            className={`px-2.5 py-1 rounded-full transition ${
+                            className={`px-3 py-1 rounded-full transition ${
                               comparisonMode === m.id
                                 ? "bg-white shadow-sm text-gray-900"
                                 : "text-gray-500"
@@ -1779,308 +1675,242 @@ const performanceHistoryDisplay =
                           </button>
                         ))}
                       </div>
-
-                      {/* Dates personnalisées */}
-                      {comparisonMode === "custom" && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={comparisonStartDate}
-                            onChange={(e) => {
-                              setComparisonStartDate(e.target.value);
-                              setComparisonMode("custom");
-                            }}
-                            className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
-                          />
-                          <span className="text-gray-400">→</span>
-                          <input
-                            type="date"
-                            value={comparisonEndDate}
-                            onChange={(e) => {
-                              setComparisonEndDate(e.target.value);
-                              setComparisonMode("custom");
-                            }}
-                            className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
-                          />
-                        </div>
-                      )}
                     </div>
-                  </div>
-                </div>
 
-                <div className="h-64">
-                  {comparisonData ? (
-                    <Line data={comparisonData} options={comparisonOptions} />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-gray-400 text-center px-6">
-                      Sélectionnez au moins une ligne et une période pour
-                      afficher l’historique. En mode "Perso", vous pouvez
-                      choisir une plage précise (par exemple du 2023-03-01 au
-                      2023-05-31).
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {/* 3️⃣ Diversification */}
-              <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Camembert */}
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h2 className="text-sm font-semibold text-gray-800">
-                        Répartition par classe d’actifs
-                      </h2>
-                      <p className="text-xs text-gray-500">
-                        Actions, épargne, cryptos, liquidités…
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                    {hasAllocations ? (
-                      <>
-                        <div className="relative h-56 w-56">
-                          {/* halo */}
-                          <div className="absolute inset-4 rounded-full bg-[radial-gradient(circle_at_30%_0,#FDE68A_0,#FFFFFF_40%,#E5E7EB_80%)] opacity-40 blur-md pointer-events-none" />
-                          <div className="relative h-full w-full">
-                            <Doughnut
-                              data={doughnutData}
-                              options={doughnutOptions}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Légende moderne sous le donut */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full max-w-md">
-                          {assetAllocations.map((a) => (
-                            <div
-                              key={a.label}
-                              className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"
-                            >
-                              <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: a.color }}
-                              />
-                              <div className="flex flex-col">
-                                <span className="text-xs font-medium text-gray-800">
-                                  {a.label}
-                                </span>
-                                <span className="text-[11px] text-gray-500">
-                                  {a.percent} %
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="h-40 w-40 rounded-full border-4 border-dashed border-gray-200 flex items-center justify-center text-xs text-gray-400 text-center px-4">
-                        Aucune donnée suffisante pour afficher la répartition.
+                    {comparisonMode === "custom" && (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-gray-500">De :</span>
+                        <input
+                          type="date"
+                          value={comparisonStartDate}
+                          onChange={(e) =>
+                            setComparisonStartDate(e.target.value)
+                          }
+                          className="border border-gray-200 rounded-full px-3 py-1.5 text-xs bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                        />
+                        <span className="text-gray-500">à :</span>
+                        <input
+                          type="date"
+                          value={comparisonEndDate}
+                          onChange={(e) =>
+                            setComparisonEndDate(e.target.value)
+                          }
+                          className="border border-gray-200 rounded-full px-3 py-1.5 text-xs bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                        />
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Par type de compte */}
-                <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                  <h2 className="text-sm font-semibold text-gray-800 mb-4">
-                    Répartition par type de compte
-                  </h2>
-
-                  {accountTypeAllocations.length === 0 ? (
-                    <p className="text-xs text-gray-400">
-                      Aucune donnée de compte disponible.
-                    </p>
+                <div className="mt-3 h-64">
+                  {comparisonData ? (
+                    <Line data={comparisonData} options={comparisonOptions} />
                   ) : (
-                    <div className="space-y-3">
-                      {accountTypeAllocations.map((acc) => (
-                        <div key={acc.label} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-gray-700">
-                              {translateAccountTypeLabel(acc.label)}
-                            </span>
-                            <span className="text-gray-900 font-medium">
-                              {acc.percent} %
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-[#D4AF37] to-[#6B7280]"
-                              style={{ width: `${acc.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex h-full items-center justify-center text-xs text-gray-400">
+                      Sélectionnez au moins une ligne pour afficher la
+                      comparaison.
                     </div>
                   )}
-
-                  <p className="mt-4 text-[11px] text-gray-400 leading-relaxed">
-                    La valeur de chaque compte inclut les placements qu’il
-                    contient ainsi que, le cas échéant, le solde en cash.
-                  </p>
                 </div>
+
+                <p className="mt-3 text-[11px] text-gray-400">
+                  En mode “Performance (%)”, chaque courbe démarre à 0&nbsp;% et
+                  montre la variation relative depuis le début de la période.
+                </p>
               </section>
 
-              {/* 4️⃣ Analyse du risque */}
-              <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="bg-white rounded-2xl border border-gray-200 p-5 lg:col-span-2 flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h2 className="text-sm font-semibold text-gray-800">
-                        Profil de risque global
-                      </h2>
-                      <p className="text-xs text-gray-500">
-                        Indicateurs de synthèse sur votre portefeuille.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex-1 h-56">
+              {/* 3️⃣ Profil de risque + répartition */}
+              <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* Radar + texte */}
+                <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 p-5 flex flex-col md:flex-row gap-6">
+                  <div className="w-full md:w-1/2 h-64">
                     <Radar data={riskRadarData} options={riskRadarOptions} />
                   </div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400 mb-1">
-                      Résumé
-                    </p>
-                    <p className="text-sm font-semibold text-gray-900">
-                      {riskProfile.globalLabel}
-                    </p>
-                  </div>
-
-                  <div className="text-xs space-y-2 text-gray-600">
-                    <p>
-                      <span className="font-semibold">Volatilité : </span>
-                      {riskProfile.volatilityLabel}.
-                    </p>
-                    <p>
-                      <span className="font-semibold">
-                        Baisse maximale observée :{" "}
-                      </span>
-                      {riskProfile.maxDrawdownPct} %.
-                    </p>
-                    <p>
-                      <span className="font-semibold">Diversification : </span>
-                      {riskProfile.diversificationLabel}.
-                    </p>
-                  </div>
-
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Ces éléments sont indicatifs et ne constituent pas un
-                    conseil en investissement. Ils ont pour but de vous aider à
-                    mieux lire votre situation globale.
-                  </p>
-                </div>
-              </section>
-
-              {/* 5️⃣ Analyse des principales lignes */}
-              <section className="bg-white rounded-2xl border border-gray-200 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
+                  <div className="w-full md:w-1/2 space-y-3">
                     <h2 className="text-sm font-semibold text-gray-800">
-                      Analyse des principales lignes
+                      Profil de risque global
                     </h2>
                     <p className="text-xs text-gray-500">
-                      Top 5 par poids dans le portefeuille.
+                      Basé sur la volatilité quotidienne de votre portefeuille,
+                      les plus fortes baisses historiques et la répartition de
+                      vos lignes.
+                    </p>
+
+                    <div className="space-y-2 text-xs text-gray-700">
+                      <p>
+                        <span className="font-semibold text-gray-900">
+                          Niveau global :
+                        </span>{" "}
+                        {riskProfile.globalLabel}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-gray-900">
+                          Volatilité :
+                        </span>{" "}
+                        {riskProfile.volatilityLabel}{" "}
+                        {dailyReturns.length > 5 &&
+                          `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-gray-900">
+                          Pire baisse enregistrée :
+                        </span>{" "}
+                        {maxDrawdownPct} %
+                      </p>
+                      <p>
+                        <span className="font-semibold text-gray-900">
+                          Diversification :
+                        </span>{" "}
+                        {riskProfile.diversificationLabel}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-gray-900">
+                          Liquidités :
+                        </span>{" "}
+                        {cashPct} % du portefeuille
+                      </p>
+                    </div>
+
+                    <p className="text-[11px] text-gray-400">
+                      Ces indicateurs sont calculés à partir des données
+                      enregistrées dans Olympe et ne constituent pas un conseil
+                      en investissement.
                     </p>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100 text-[11px] uppercase text-gray-400">
-                        <th className="text-left py-2 pr-4 font-medium">
-                          Placement
-                        </th>
-                        <th className="text-left py-2 pr-4 font-medium">
-                          Poids
-                        </th>
-                        <th className="text-right py-2 pr-4 font-medium">
-                          Perf. 30 jours
-                        </th>
-                        <th className="text-right py-2 pr-4 font-medium">
-                          Volatilité
-                        </th>
-                        <th className="text-left py-2 pr-0 font-medium">
-                          Indicateur visuel
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {holdingsAnalysisRows.length === 0 ? (
+                {/* Top lignes */}
+                <div className="bg-white rounded-2xl border border-gray-200 p-5">
+                  <h2 className="text-sm font-semibold text-gray-800 mb-1">
+                    Analyse des principales lignes
+                  </h2>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Top 5 des lignes les plus pondérées, avec leur poids dans le
+                    portefeuille et leur volatilité approximative.
+                  </p>
+
+                  <div className="overflow-hidden rounded-xl border border-gray-100">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-gray-50 text-[11px] uppercase tracking-[0.12em] text-gray-500">
                         <tr>
-                          <td
-                            colSpan={5}
-                            className="py-6 text-center text-xs text-gray-400"
-                          >
-                            Aucune ligne à analyser pour le moment.
-                          </td>
+                          <th className="px-3 py-2 text-left">Ligne</th>
+                          <th className="px-3 py-2 text-right">Poids</th>
+                          <th className="px-3 py-2 text-right">Perf 30 j</th>
+                          <th className="px-3 py-2 text-right">Volatilité</th>
                         </tr>
-                      ) : (
-                        holdingsAnalysisRows.map((h, index) => (
-                          <motion.tr
-                            key={h.name + h.ticker}
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{
-                              delay: 0.03 * index,
-                              duration: 0.2,
-                            }}
-                            className="group border-b border-gray-50 hover:bg-gray-50/60 transition"
-                          >
-                            <td className="py-2 pr-4">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-medium text-gray-800">
-                                  {h.name}
-                                </span>
-                                {h.ticker && (
-                                  <span className="text-[11px] text-gray-400">
-                                    {h.ticker}
+                      </thead>
+                      <tbody>
+                        {holdingsAnalysisRows.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={4}
+                              className="px-3 py-4 text-center text-gray-400 text-[11px]"
+                            >
+                              Pas encore assez de données pour analyser vos
+                              lignes.
+                            </td>
+                          </tr>
+                        ) : (
+                          holdingsAnalysisRows.map((h, index) => (
+                            <motion.tr
+                              key={h.id} // ✅ clé unique
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{
+                                delay: 0.03 * index,
+                                duration: 0.2,
+                              }}
+                              className="group border-b border-gray-50 hover:bg-gray-50/60 transition"
+                            >
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium text-gray-900">
+                                    {h.name}
                                   </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-2 pr-4 text-xs text-gray-700">
-                              {h.weightPct} %
-                            </td>
-                            <td className="py-2 pr-4 text-right text-xs">
-                              <span
-                                className={
+                                  {h.ticker && (
+                                    <span className="text-[10px] text-gray-500">
+                                      {h.ticker}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">
+                                {h.weightPct} %
+                              </td>
+                              <td
+                                className={`px-3 py-2 text-right text-xs ${
                                   h.perfPct > 0
                                     ? "text-emerald-600"
                                     : h.perfPct < 0
-                                    ? "text-red-500"
+                                    ? "text-red-600"
                                     : "text-gray-600"
-                                }
+                                }`}
                               >
                                 {h.perfPct > 0 ? "+" : ""}
                                 {h.perfPct} %
-                              </span>
-                            </td>
-                            <td className="py-2 pr-4 text-right text-xs text-gray-700">
-                              {h.volatility}
-                            </td>
-                            <td className="py-2 pr-0">
-                              <div className="w-40 h-2 rounded-full bg-gray-100 overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-[#D4AF37]"
-                                  style={{ width: `${h.weightPct}%` }}
-                                />
-                              </div>
-                            </td>
-                          </motion.tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">
+                                {h.volatility}
+                              </td>
+                            </motion.tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+
+              {/* 4️⃣ Répartition par catégorie (camembert) */}
+              <section className="bg-white rounded-2xl border border-gray-200 p-5">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-800">
+                      Répartition par grande catégorie
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Liquidités, épargne, investissements, crypto, etc.
+                    </p>
+                  </div>
                 </div>
 
-                <p className="mt-4 text-[11px] text-gray-400 leading-relaxed">
-                  Plus une ligne est lourde dans votre portefeuille, plus son
-                  comportement impacte la valeur globale.
-                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                  <div className="md:col-span-2 h-56">
+                    {hasAllocations ? (
+                      <Doughnut data={doughnutData} options={doughnutOptions} />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-gray-400">
+                        Aucune donnée de répartition disponible.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {assetAllocations.map((a) => (
+                      <div
+                        key={a.label}
+                        className="flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: a.color }}
+                          />
+                          <span className="text-gray-700">{a.label}</span>
+                        </div>
+                        <span className="text-gray-900 font-medium">
+                          {a.percent} %
+                        </span>
+                      </div>
+                    ))}
+                    {assetAllocations.length === 0 && (
+                      <p className="text-[11px] text-gray-400">
+                        Ajoutez des comptes et des placements pour voir votre
+                        allocation.
+                      </p>
+                    )}
+                  </div>
+                </div>
               </section>
             </>
           )}
@@ -2090,45 +1920,56 @@ const performanceHistoryDisplay =
   );
 }
 
-// 📌 Item de sidebar
+/* ---------- Petits composants UI ---------- */
+
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
+      className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-xl transition ${
         active
-          ? "bg-white/5 text-white"
-          : "text-white/60 hover:bg-white/5 hover:text-white"
-      } transition`}
+          ? "bg-white/10 text-white"
+          : "text-white/70 hover:bg-white/5 hover:text-white"
+      }`}
     >
       <Icon size={16} />
-      {label}
+      <span>{label}</span>
     </button>
   );
 }
 
-// 📌 Petite card KPI
 function KpiCard({ label, value, subtitle, positive }) {
+  const isNumber = typeof value === "string" && value.includes("%");
+  const isPositive =
+    positive !== undefined
+      ? positive
+      : isNumber
+      ? !value.startsWith("-")
+      : false;
+
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 flex flex-col justify-between transition-transform transition-shadow duration-200 hover:shadow-[0_12px_30px_rgba(15,16,19,0.12)] hover:-translate-y-[2px]">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400 mb-1">
-        {label}
-      </p>
-      <p className="text-base font-semibold text-gray-900">
-        <span
-          className={
-            positive === undefined
-              ? ""
-              : positive
-              ? "text-emerald-600"
-              : "text-red-500"
-          }
-        >
-          {value}
-        </span>
-      </p>
+    <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col justify-between h-full">
+      <div>
+        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+          {label}
+        </p>
+        <p className="text-base font-semibold text-gray-900">{value}</p>
+      </div>
       {subtitle && (
-        <p className="mt-1 text-[11px] text-gray-400">{subtitle}</p>
+        <div className="mt-2 flex items-center justify-between">
+          <p className="text-[11px] text-gray-500">{subtitle}</p>
+          {isNumber && (
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                isPositive
+                  ? "border-emerald-200 text-emerald-700 bg-emerald-50"
+                  : "border-red-200 text-red-700 bg-red-50"
+              }`}
+            >
+              {isPositive ? "Positif" : "Négatif"}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
