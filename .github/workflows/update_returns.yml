@@ -1,0 +1,27 @@
+name: Update instrument returns
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # tous les jours à 03h00
+  workflow_dispatch: {}
+
+jobs:
+  update-returns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install yfinance supabase
+
+      - name: Run fetch_returns script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python scripts/fetch_returns.py
