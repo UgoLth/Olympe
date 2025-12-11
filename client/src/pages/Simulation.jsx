@@ -46,7 +46,9 @@ const formatCurrency0 = (n) =>
   }).format(n || 0);
 
 const formatPct1 = (v) =>
-  `${(v > 0 ? "+" : v < 0 ? "" : "")}${(Math.round(v * 10) / 10).toFixed(1)} %`;
+  `${(v > 0 ? "+" : v < 0 ? "" : "")}${(Math.round(v * 10) / 10).toFixed(
+    1
+  )} %`;
 
 // --- Simulation simple capital + versements mensuels ---
 const simulateScenario = ({
@@ -198,6 +200,7 @@ export default function Simulation() {
       let accountReturnsLocal = {};
 
       if (instrumentIds.length > 0) {
+        // 1) Instruments
         const { data: instruments, error: instErr } = await supabase
           .from("instruments")
           .select("id, symbol, name, asset_class")
@@ -209,44 +212,29 @@ export default function Simulation() {
           (instruments || []).map((i) => [i.id, i])
         );
 
-        // Prices sur 1 an pour calculer un rendement simple
-        const now = new Date();
-        const oneYearAgo = new Date(now);
-        oneYearAgo.setFullYear(now.getFullYear() - 1);
-        const isoOneYearAgo = oneYearAgo.toISOString();
+        // 2) Rendements automatiques depuis instrument_returns
+        const { data: returnsData, error: retErr } = await supabase
+          .from("instrument_returns")
+          .select("instrument_id, cagr, period_years")
+          .in("instrument_id", instrumentIds);
 
-        const { data: prices, error: priceErr } = await supabase
-          .from("asset_prices")
-          .select("instrument_id, price, fetched_at")
-          .in("instrument_id", instrumentIds)
-          .gte("fetched_at", isoOneYearAgo)
-          .order("fetched_at", { ascending: true });
+        if (retErr) throw retErr;
 
-        if (priceErr) throw priceErr;
-
-        const grouped = {};
-        (prices || []).forEach((p) => {
-          if (!grouped[p.instrument_id]) grouped[p.instrument_id] = [];
-          grouped[p.instrument_id].push({
-            date: new Date(p.fetched_at),
-            price: toNumber(p.price),
-          });
+        (returnsData || []).forEach((r) => {
+          if (r.cagr === null || r.cagr === undefined) return;
+          // cagr stocké en décimal (ex : 0.07) -> on convertit en %
+          const pct = Number(r.cagr) * 100;
+          if (!Number.isFinite(pct)) return;
+          // on évite les valeurs négatives pour rester cohérent avec ton choix
+          instrumentReturnsLocal[r.instrument_id] = Math.max(0, pct);
         });
 
-        Object.entries(grouped).forEach(([instId, series]) => {
-          if (!series.length) return;
-          const first = series[0].price;
-          const last = series[series.length - 1].price;
-          if (first > 0 && last > 0) {
-            const simpleReturn = ((last / first - 1) * 100);
-            instrumentReturnsLocal[instId] = simpleReturn; // déjà en %
-          }
-        });
-
-        // Rendement moyen par compte (répartition actuelle)
+        // 3) Rendement moyen pondéré par compte (répartition actuelle)
         const holdingsByAccount = {};
         (holdingsData || []).forEach((h) => {
-          if (!holdingsByAccount[h.account_id]) holdingsByAccount[h.account_id] = [];
+          if (!holdingsByAccount[h.account_id]) {
+            holdingsByAccount[h.account_id] = [];
+          }
           holdingsByAccount[h.account_id].push(h);
         });
 
@@ -268,7 +256,9 @@ export default function Simulation() {
             const weight = toNumber(h.current_value) / totalVal;
             sum += weight * instR;
           });
-          accountReturnsLocal[acc.id] = sum; // % estimé
+
+          accountReturnsLocal[acc.id] =
+            Object.keys(instrumentReturnsLocal).length > 0 ? sum : null;
         });
       }
 
@@ -324,10 +314,8 @@ export default function Simulation() {
     [scenarioB]
   );
 
-  const finalA =
-    simA.length > 0 ? simA[simA.length - 1].value : 0;
-  const finalB =
-    simB.length > 0 ? simB[simB.length - 1].value : 0;
+  const finalA = simA.length > 0 ? simA[simA.length - 1].value : 0;
+  const finalB = simB.length > 0 ? simB[simB.length - 1].value : 0;
 
   const diffAB = finalB - finalA;
   const maxYearsSim = Math.max(
@@ -487,7 +475,8 @@ export default function Simulation() {
   );
 
   const autoLineReturn =
-    selectedHolding && instrumentReturns[selectedHolding.instrument_id] !== undefined
+    selectedHolding &&
+    instrumentReturns[selectedHolding.instrument_id] !== undefined
       ? instrumentReturns[selectedHolding.instrument_id]
       : null;
 
@@ -830,8 +819,8 @@ export default function Simulation() {
                       Profils types
                     </h2>
                     <p className="text-xs text-gray-500 mb-3">
-                      Appliquez un profil à votre scénario A (simple preset, vous
-                      pouvez ensuite ajuster).
+                      Appliquez un profil à votre scénario A (simple preset,
+                      vous pouvez ensuite ajuster).
                     </p>
                     <div className="flex flex-wrap gap-2 text-xs">
                       {[
@@ -1129,8 +1118,7 @@ export default function Simulation() {
                           <p>
                             Pour viser{" "}
                             {formatCurrency0(toNumber(lineTargetAmount))} dans{" "}
-                            {toNumber(lineYears) || 0} ans avec un rendement
-                            de{" "}
+                            {toNumber(lineYears) || 0} ans avec un rendement de{" "}
                             {effectiveLineReturn
                               ? `${effectiveLineReturn.toFixed(1)} %/an`
                               : "0 %/an"}
@@ -1220,8 +1208,7 @@ export default function Simulation() {
                         <option value="">Sélectionner un compte…</option>
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
-                            {a.name || "Compte"}{" "}
-                            {a.type ? `• ${a.type}` : ""}
+                            {a.name || "Compte"} {a.type ? `• ${a.type}` : ""}
                           </option>
                         ))}
                       </select>
@@ -1305,10 +1292,8 @@ export default function Simulation() {
                         <p className="text-xs text-gray-700">
                           Capital supplémentaire total estimé à investir
                           aujourd’hui pour viser{" "}
-                          {formatCurrency0(
-                            toNumber(accountTargetAmount)
-                          )}{" "}
-                          dans {toNumber(accountYears) || 0} ans avec{" "}
+                          {formatCurrency0(toNumber(accountTargetAmount))} dans{" "}
+                          {toNumber(accountYears) || 0} ans avec{" "}
                           {effectiveAccountReturn.toFixed(1)} %/an :{" "}
                           <span className="font-semibold">
                             {formatCurrency0(accountExtraNow)}
@@ -1383,16 +1368,10 @@ export default function Simulation() {
                                   </div>
                                   <div className="text-right text-[11px] text-gray-600">
                                     {row ? (
-                                      <>
-                                        <p>
-                                          +{" "}
-                                          {row.extraParts.toFixed(2)} parts (
-                                          {formatCurrency0(
-                                            row.extraAmount
-                                          )}
-                                          )
-                                        </p>
-                                      </>
+                                      <p>
+                                        + {row.extraParts.toFixed(2)} parts (
+                                        {formatCurrency0(row.extraAmount)})
+                                      </p>
                                     ) : (
                                       <p className="text-gray-400">
                                         {accountExtraNow <= 0
@@ -1481,9 +1460,7 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
           <input
             type="number"
             value={scenario.monthlyContribution}
-            onChange={(e) =>
-              onChange("monthlyContribution", e.target.value)
-            }
+            onChange={(e) => onChange("monthlyContribution", e.target.value)}
             className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
             placeholder="ex : 200"
           />
@@ -1503,9 +1480,7 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
           <input
             type="number"
             value={scenario.annualReturnPct}
-            onChange={(e) =>
-              onChange("annualReturnPct", e.target.value)
-            }
+            onChange={(e) => onChange("annualReturnPct", e.target.value)}
             className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
             placeholder="ex : 7"
           />
