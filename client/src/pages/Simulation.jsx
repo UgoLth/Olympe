@@ -35,8 +35,17 @@ ChartJS.register(
   Filler
 );
 
-const toNumber = (v) =>
-  v === null || v === undefined || v === "" ? 0 : Number(v);
+const toNumber = (v) => (v === null || v === undefined || v === "" ? 0 : Number(v));
+const toNullableNumber = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const toNullableInt = (v) => {
+  const n = toNullableNumber(v);
+  if (n === null) return null;
+  return Math.max(0, Math.floor(n));
+};
 
 const formatCurrency0 = (n) =>
   new Intl.NumberFormat("fr-FR", {
@@ -46,17 +55,10 @@ const formatCurrency0 = (n) =>
   }).format(n || 0);
 
 const formatPct1 = (v) =>
-  `${(v > 0 ? "+" : v < 0 ? "" : "")}${(Math.round(v * 10) / 10).toFixed(
-    1
-  )} %`;
+  `${(v > 0 ? "+" : v < 0 ? "" : "")}${(Math.round(v * 10) / 10).toFixed(1)} %`;
 
 // --- Simulation simple capital + versements mensuels ---
-const simulateScenario = ({
-  initialCapital,
-  monthlyContribution,
-  years,
-  annualReturnPct,
-}) => {
+const simulateScenario = ({ initialCapital, monthlyContribution, years, annualReturnPct }) => {
   const values = [];
   let capital = toNumber(initialCapital);
   const monthly = toNumber(monthlyContribution);
@@ -81,17 +83,15 @@ const futureValue = (current, annualReturnPct, years) => {
 };
 
 // Montant à investir aujourd’hui pour atteindre une cible
-// FV = (current FV + extra * (1+r)^t) = target -> extra
 const extraNowForGoal = (currentValue, target, annualReturnPct, years) => {
   const fvCurrent = futureValue(currentValue, annualReturnPct, years);
   const tgt = toNumber(target);
   const r = toNumber(annualReturnPct) / 100;
   const t = toNumber(years);
-  if (t <= 0 || r === 0) {
-    // si pas de rendement, on considère un investissement cash simple
-    return Math.max(0, tgt - currentValue);
-  }
+
+  if (t <= 0 || r === 0) return Math.max(0, tgt - currentValue);
   if (fvCurrent >= tgt) return 0;
+
   const factor = Math.pow(1 + r, t);
   return Math.max(0, (tgt - fvCurrent) / factor);
 };
@@ -136,7 +136,7 @@ export default function Simulation() {
   const [selectedHoldingId, setSelectedHoldingId] = useState("");
   const [lineTargetAmount, setLineTargetAmount] = useState("");
   const [lineYears, setLineYears] = useState("");
-  const [lineReturnInput, setLineReturnInput] = useState(""); // valeur que tape l'utilisateur
+  const [lineReturnInput, setLineReturnInput] = useState("");
   const [savingLineGoal, setSavingLineGoal] = useState(false);
   const [lineGoalMessage, setLineGoalMessage] = useState("");
 
@@ -146,7 +146,7 @@ export default function Simulation() {
   const [accountYears, setAccountYears] = useState("");
   const [accountReturnInput, setAccountReturnInput] = useState("");
   const [allocationMode, setAllocationMode] = useState("current"); // "current" | "target"
-  const [targetWeights, setTargetWeights] = useState({}); // {holdingId: %}
+  const [targetWeights, setTargetWeights] = useState({});
   const [savingAccountGoal, setSavingAccountGoal] = useState(false);
   const [accountGoalMessage, setAccountGoalMessage] = useState("");
 
@@ -170,9 +170,7 @@ export default function Simulation() {
     try {
       const { data: accountsData, error: accErr } = await supabase
         .from("accounts")
-        .select(
-          "id, user_id, name, type, currency, current_amount, initial_amount"
-        )
+        .select("id, user_id, name, type, currency, current_amount, initial_amount, created_at")
         .eq("user_id", uid)
         .order("created_at", { ascending: true });
 
@@ -180,19 +178,13 @@ export default function Simulation() {
 
       const { data: holdingsData, error: holdErr } = await supabase
         .from("holdings")
-        .select(
-          "id, user_id, account_id, instrument_id, quantity, avg_buy_price, current_price, current_value, asset_label"
-        )
+        .select("id, user_id, account_id, instrument_id, quantity, avg_buy_price, current_price, current_value, asset_label")
         .eq("user_id", uid);
 
       if (holdErr) throw holdErr;
 
       const instrumentIds = Array.from(
-        new Set(
-          (holdingsData || [])
-            .map((h) => h.instrument_id)
-            .filter((id) => !!id)
-        )
+        new Set((holdingsData || []).map((h) => h.instrument_id).filter(Boolean))
       );
 
       let instrumentsByIdLocal = {};
@@ -208,9 +200,7 @@ export default function Simulation() {
 
         if (instErr) throw instErr;
 
-        instrumentsByIdLocal = Object.fromEntries(
-          (instruments || []).map((i) => [i.id, i])
-        );
+        instrumentsByIdLocal = Object.fromEntries((instruments || []).map((i) => [i.id, i]));
 
         // 2) Rendements automatiques depuis instrument_returns
         const { data: returnsData, error: retErr } = await supabase
@@ -222,28 +212,22 @@ export default function Simulation() {
 
         (returnsData || []).forEach((r) => {
           if (r.cagr === null || r.cagr === undefined) return;
-          // cagr stocké en décimal (ex : 0.07) -> on convertit en %
-          const pct = Number(r.cagr) * 100;
+          const pct = Number(r.cagr) * 100; // décimal -> %
           if (!Number.isFinite(pct)) return;
-          // on évite les valeurs négatives pour rester cohérent avec ton choix
           instrumentReturnsLocal[r.instrument_id] = Math.max(0, pct);
         });
 
-        // 3) Rendement moyen pondéré par compte (répartition actuelle)
+        // 3) Rendement moyen pondéré par compte
         const holdingsByAccount = {};
         (holdingsData || []).forEach((h) => {
-          if (!holdingsByAccount[h.account_id]) {
-            holdingsByAccount[h.account_id] = [];
-          }
+          if (!holdingsByAccount[h.account_id]) holdingsByAccount[h.account_id] = [];
           holdingsByAccount[h.account_id].push(h);
         });
 
         (accountsData || []).forEach((acc) => {
           const list = holdingsByAccount[acc.id] || [];
           let totalVal = 0;
-          list.forEach((h) => {
-            totalVal += toNumber(h.current_value);
-          });
+          list.forEach((h) => (totalVal += toNumber(h.current_value)));
           if (totalVal <= 0) {
             accountReturnsLocal[acc.id] = null;
             return;
@@ -257,8 +241,7 @@ export default function Simulation() {
             sum += weight * instR;
           });
 
-          accountReturnsLocal[acc.id] =
-            Object.keys(instrumentReturnsLocal).length > 0 ? sum : null;
+          accountReturnsLocal[acc.id] = Object.keys(instrumentReturnsLocal).length > 0 ? sum : null;
         });
       }
 
@@ -274,13 +257,11 @@ export default function Simulation() {
     }
   };
 
-  // --- Déconnexion automatique si pas "remember" ---
+  // --- Déconnexion auto si pas remember ---
   useEffect(() => {
     const handleBeforeUnload = async () => {
       const remember = localStorage.getItem("olympe_remember_me");
-      if (!remember) {
-        await supabase.auth.signOut();
-      }
+      if (!remember) await supabase.auth.signOut();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -292,7 +273,7 @@ export default function Simulation() {
     navigate("/");
   };
 
-  // --- MàJ scénarios (string -> nombre dans la simulation) ---
+  // --- MàJ scénarios ---
   const updateScenario = (which, field, value) => {
     const updater = which === "A" ? setScenarioA : setScenarioB;
     updater((prev) => ({ ...prev, [field]: value }));
@@ -305,14 +286,8 @@ export default function Simulation() {
     annualReturnPct: toNumber(s.annualReturnPct),
   });
 
-  const simA = useMemo(
-    () => simulateScenario(parseScenarioForSim(scenarioA)),
-    [scenarioA]
-  );
-  const simB = useMemo(
-    () => simulateScenario(parseScenarioForSim(scenarioB)),
-    [scenarioB]
-  );
+  const simA = useMemo(() => simulateScenario(parseScenarioForSim(scenarioA)), [scenarioA]);
+  const simB = useMemo(() => simulateScenario(parseScenarioForSim(scenarioB)), [scenarioB]);
 
   const finalA = simA.length > 0 ? simA[simA.length - 1].value : 0;
   const finalB = simB.length > 0 ? simB[simB.length - 1].value : 0;
@@ -369,11 +344,7 @@ export default function Simulation() {
       legend: {
         display: true,
         position: "bottom",
-        labels: {
-          boxWidth: 12,
-          color: "#4B5563",
-          font: { size: 11 },
-        },
+        labels: { boxWidth: 12, color: "#4B5563", font: { size: 11 } },
       },
       tooltip: {
         backgroundColor: "#0F1013",
@@ -382,21 +353,14 @@ export default function Simulation() {
         padding: 10,
         cornerRadius: 12,
         callbacks: {
-          label: (ctx) =>
-            `${ctx.dataset.label}: ${formatCurrency0(ctx.parsed.y)}`,
+          label: (ctx) => `${ctx.dataset.label}: ${formatCurrency0(ctx.parsed.y)}`,
         },
       },
     },
     scales: {
-      x: {
-        grid: { display: false },
-        ticks: { color: "#9CA3AF", font: { size: 11 } },
-      },
+      x: { grid: { display: false }, ticks: { color: "#9CA3AF", font: { size: 11 } } },
       y: {
-        grid: {
-          color: "rgba(209,213,219,0.5)",
-          drawBorder: false,
-        },
+        grid: { color: "rgba(209,213,219,0.5)", drawBorder: false },
         ticks: {
           color: "#9CA3AF",
           font: { size: 11 },
@@ -406,6 +370,17 @@ export default function Simulation() {
     },
   };
 
+  // ✅ helper pour afficher une erreur Supabase utile
+  const explainSupabaseError = (error) => {
+    if (!error) return "Erreur inconnue.";
+    const parts = [];
+    if (error.message) parts.push(error.message);
+    if (error.details) parts.push(error.details);
+    if (error.hint) parts.push(error.hint);
+    if (!parts.length) return "Erreur lors de l'enregistrement (requête invalide).";
+    return parts.join(" • ");
+  };
+
   // --- Enregistrement objectif global ---
   const handleSaveGlobalGoal = async () => {
     if (!userId) return;
@@ -413,27 +388,32 @@ export default function Simulation() {
     setGlobalGoalMessage("");
 
     const parsed = parseScenarioForSim(scenarioA);
+
+    // ✅ payload “propre” (pas de NaN / pas de "")
+    const payload = {
+      user_id: userId,
+      title: globalGoalTitle?.trim() || "Objectif global",
+      target_amount: toNullableNumber(globalGoalTarget),
+      initial_capital: toNullableNumber(parsed.initialCapital) ?? 0,
+      monthly_contribution: toNullableNumber(parsed.monthlyContribution) ?? 0,
+      expected_return_pct: toNullableNumber(parsed.annualReturnPct),
+      horizon_years: toNullableInt(parsed.years),
+      scope: "global",
+      details: { scenario: "A" },
+    };
+
     try {
-      const { error } = await supabase.from("investment_goals").insert({
-        user_id: userId,
-        title: globalGoalTitle || "Objectif global",
-        target_amount: toNumber(globalGoalTarget) || null,
-        initial_capital: parsed.initialCapital,
-        monthly_contribution: parsed.monthlyContribution,
-        expected_return_pct: parsed.annualReturnPct,
-        horizon_years: parsed.years,
-        scope: "global_simulation",
-        details: {
-          scenario: "A",
-        },
-      });
+      const { error } = await supabase
+        .from("investment_goals")
+        .insert([payload])
+        .select("id")
+        .single();
+
       if (error) {
-        console.error(error);
-        setGlobalGoalMessage("Erreur lors de l’enregistrement de l’objectif.");
+        console.error("insert global goal error:", error);
+        setGlobalGoalMessage(explainSupabaseError(error));
       } else {
-        setGlobalGoalMessage(
-          "Objectif global enregistré dans votre tableau de bord ✨"
-        );
+        setGlobalGoalMessage("Objectif global enregistré dans votre tableau de bord ✨");
       }
     } finally {
       setSavingGlobalGoal(false);
@@ -446,15 +426,17 @@ export default function Simulation() {
       holdings.map((h) => {
         const inst = instrumentsById[h.instrument_id] || {};
         const acc = accounts.find((a) => a.id === h.account_id) || {};
+        const currentValue =
+          h.current_value !== null && h.current_value !== undefined
+            ? toNumber(h.current_value)
+            : toNumber(h.quantity) * toNumber(h.current_price);
+
         return {
           ...h,
           instrumentSymbol: inst.symbol || "",
           instrumentName: inst.name || "",
           accountName: acc.name || "",
-          currentValue:
-            h.current_value !== null && h.current_value !== undefined
-              ? toNumber(h.current_value)
-              : toNumber(h.quantity) * toNumber(h.current_price),
+          currentValue,
         };
       }),
     [holdings, instrumentsById, accounts]
@@ -470,20 +452,15 @@ export default function Simulation() {
   }, [holdingsWithMeta]);
 
   // --- Objectif par ligne : calculs ---
-  const selectedHolding = holdingsWithMeta.find(
-    (h) => String(h.id) === String(selectedHoldingId)
-  );
+  const selectedHolding = holdingsWithMeta.find((h) => String(h.id) === String(selectedHoldingId));
 
   const autoLineReturn =
-    selectedHolding &&
-    instrumentReturns[selectedHolding.instrument_id] !== undefined
+    selectedHolding && instrumentReturns[selectedHolding.instrument_id] !== undefined
       ? instrumentReturns[selectedHolding.instrument_id]
       : null;
 
   const effectiveLineReturn =
-    lineReturnInput === "" && autoLineReturn !== null
-      ? autoLineReturn
-      : toNumber(lineReturnInput);
+    lineReturnInput === "" && autoLineReturn !== null ? autoLineReturn : toNumber(lineReturnInput);
 
   const lineExtraNow = selectedHolding
     ? extraNowForGoal(
@@ -504,40 +481,41 @@ export default function Simulation() {
     setSavingLineGoal(true);
     setLineGoalMessage("");
 
+    const effectiveR = toNullableNumber(effectiveLineReturn);
+
+    const payload = {
+      user_id: userId,
+      title: `${selectedHolding.instrumentName || selectedHolding.asset_label || "Ligne"} – objectif`,
+      target_amount: toNullableNumber(lineTargetAmount),
+      initial_capital: toNullableNumber(selectedHolding.currentValue) ?? 0,
+      expected_return_pct: effectiveR,
+      horizon_years: toNullableInt(lineYears),
+      scope: "line",
+      account_id: selectedHolding.account_id, // uuid OK
+      holding_id: selectedHolding.id, // uuid OK
+      details: {
+        type: "single_line",
+        instrument_id: selectedHolding.instrument_id,
+        instrument_symbol: selectedHolding.instrumentSymbol,
+        auto_return_pct: autoLineReturn,
+        used_return_pct: effectiveR,
+        extra_now: lineExtraNow,
+        extra_shares: lineExtraShares,
+      },
+    };
+
     try {
-      const effectiveR = effectiveLineReturn || null;
-      const { error } = await supabase.from("investment_goals").insert({
-        user_id: userId,
-        title:
-          (selectedHolding.instrumentName || selectedHolding.asset_label) +
-          " – objectif",
-        target_amount: toNumber(lineTargetAmount) || null,
-        initial_capital: selectedHolding.currentValue,
-        expected_return_pct: effectiveR,
-        horizon_years: toNumber(lineYears) || null,
-        scope: "line_goal",
-        account_id: selectedHolding.account_id,
-        holding_id: selectedHolding.id,
-        details: {
-          type: "single_line",
-          instrument_id: selectedHolding.instrument_id,
-          instrument_symbol: selectedHolding.instrumentSymbol,
-          auto_return_pct: autoLineReturn,
-          used_return_pct: effectiveR,
-          extra_now: lineExtraNow,
-          extra_shares: lineExtraShares,
-        },
-      });
+      const { error } = await supabase
+        .from("investment_goals")
+        .insert([payload])
+        .select("id")
+        .single();
 
       if (error) {
-        console.error(error);
-        setLineGoalMessage(
-          "Erreur lors de l’enregistrement de l’objectif de ligne."
-        );
+        console.error("insert line goal error:", error);
+        setLineGoalMessage(explainSupabaseError(error));
       } else {
-        setLineGoalMessage(
-          "Objectif de ligne enregistré dans votre tableau de bord ✨"
-        );
+        setLineGoalMessage("Objectif de ligne enregistré dans votre tableau de bord ✨");
       }
     } finally {
       setSavingLineGoal(false);
@@ -545,36 +523,22 @@ export default function Simulation() {
   };
 
   // --- Objectif par compte : calculs ---
-  const selectedAccount = accounts.find(
-    (a) => String(a.id) === String(selectedAccountId)
-  );
+  const selectedAccount = accounts.find((a) => String(a.id) === String(selectedAccountId));
+  const accountHoldings = selectedAccount ? holdingsByAccount[selectedAccount.id] || [] : [];
 
-  const accountHoldings = selectedAccount
-    ? holdingsByAccount[selectedAccount.id] || []
-    : [];
+  const accountCurrentValue = accountHoldings.reduce((sum, h) => sum + h.currentValue, 0);
 
-  const accountCurrentValue = accountHoldings.reduce(
-    (sum, h) => sum + h.currentValue,
-    0
-  );
-
-  // Rendement auto basé sur proportions actuelles
   const autoReturnCurrent =
-    selectedAccount && accountReturns[selectedAccount.id] !== undefined
-      ? accountReturns[selectedAccount.id]
-      : null;
+    selectedAccount && accountReturns[selectedAccount.id] !== undefined ? accountReturns[selectedAccount.id] : null;
 
-  // Rendement auto basé sur répartition cible (si au moins un rendement connu)
   const autoReturnTarget = useMemo(() => {
     if (!selectedAccount || !accountHoldings.length) return null;
 
-    // somme des % saisis (on ignore les NaN)
     let sumPct = 0;
     accountHoldings.forEach((h) => {
       const p = toNumber(targetWeights[h.id]);
       if (p > 0) sumPct += p;
     });
-
     if (sumPct <= 0) return null;
 
     let result = 0;
@@ -599,68 +563,36 @@ export default function Simulation() {
 
   const accountExtraNow =
     selectedAccount && accountCurrentValue > 0
-      ? extraNowForGoal(
-          accountCurrentValue,
-          toNumber(accountTargetAmount),
-          effectiveAccountReturn,
-          toNumber(accountYears)
-        )
+      ? extraNowForGoal(accountCurrentValue, toNumber(accountTargetAmount), effectiveAccountReturn, toNumber(accountYears))
       : 0;
 
-  // Répartition de ce capital supplémentaire
   const accountAllocationRows = useMemo(() => {
-    if (!selectedAccount || !accountHoldings.length || accountExtraNow <= 0) {
-      return [];
-    }
+    if (!selectedAccount || !accountHoldings.length || accountExtraNow <= 0) return [];
 
     let weights = [];
-    if (allocationMode === "current" || !selectedAccount) {
-      // poids actuels
+    if (allocationMode === "current") {
       if (accountCurrentValue <= 0) return [];
-      weights = accountHoldings.map((h) => ({
-        holding: h,
-        weight: h.currentValue / accountCurrentValue,
-      }));
+      weights = accountHoldings.map((h) => ({ holding: h, weight: h.currentValue / accountCurrentValue }));
     } else {
-      // répartition cible : on normalise ce que l'utilisateur a saisi
       let sum = 0;
       accountHoldings.forEach((h) => {
         const p = toNumber(targetWeights[h.id]);
         if (p > 0) sum += p;
       });
       if (sum <= 0) return [];
-      weights = accountHoldings.map((h) => ({
-        holding: h,
-        weight: Math.max(0, toNumber(targetWeights[h.id])) / sum,
-      }));
+      weights = accountHoldings.map((h) => ({ holding: h, weight: Math.max(0, toNumber(targetWeights[h.id])) / sum }));
     }
 
     return weights.map(({ holding, weight }) => {
       const extra = accountExtraNow * weight;
       const price = toNumber(holding.current_price);
       const extraParts = price > 0 ? extra / price : 0;
-
-      return {
-        holding,
-        weight,
-        extraAmount: extra,
-        extraParts,
-      };
+      return { holding, weight, extraAmount: extra, extraParts };
     });
-  }, [
-    selectedAccount,
-    accountHoldings,
-    accountExtraNow,
-    allocationMode,
-    targetWeights,
-    accountCurrentValue,
-  ]);
+  }, [selectedAccount, accountHoldings, accountExtraNow, allocationMode, targetWeights, accountCurrentValue]);
 
   const handleTargetWeightChange = (holdingId, value) => {
-    setTargetWeights((prev) => ({
-      ...prev,
-      [holdingId]: value,
-    }));
+    setTargetWeights((prev) => ({ ...prev, [holdingId]: value }));
   };
 
   const handleSaveAccountGoal = async () => {
@@ -668,45 +600,46 @@ export default function Simulation() {
     setSavingAccountGoal(true);
     setAccountGoalMessage("");
 
-    try {
-      const { error } = await supabase.from("investment_goals").insert({
-        user_id: userId,
-        title: `Objectif compte – ${selectedAccount.name || "Compte"}`,
-        target_amount: toNumber(accountTargetAmount) || null,
-        initial_capital: accountCurrentValue,
-        expected_return_pct: effectiveAccountReturn || null,
-        horizon_years: toNumber(accountYears) || null,
-        scope: "account_goal",
-        account_id: selectedAccount.id,
+    const payload = {
+      user_id: userId,
+      title: `Objectif compte – ${selectedAccount.name || "Compte"}`,
+      target_amount: toNullableNumber(accountTargetAmount),
+      initial_capital: toNullableNumber(accountCurrentValue) ?? 0,
+      expected_return_pct: toNullableNumber(effectiveAccountReturn),
+      horizon_years: toNullableInt(accountYears),
+      scope: "account",
+      account_id: selectedAccount.id,
+      allocation_mode: allocationMode,
+      details: {
+        auto_return_current_pct: autoReturnCurrent,
+        auto_return_target_pct: autoReturnTarget,
+        used_return_pct: effectiveAccountReturn,
+        extra_total: accountExtraNow,
         allocation_mode: allocationMode,
-        details: {
-          auto_return_current_pct: autoReturnCurrent,
-          auto_return_target_pct: autoReturnTarget,
-          used_return_pct: effectiveAccountReturn,
-          extra_total: accountExtraNow,
-          allocation_mode: allocationMode,
-          target_weights:
-            allocationMode === "target" ? targetWeights : undefined,
-          lines: accountAllocationRows.map((row) => ({
-            holding_id: row.holding.id,
-            instrument_id: row.holding.instrument_id,
-            instrument_symbol: row.holding.instrumentSymbol,
-            weight: row.weight,
-            extra_amount: row.extraAmount,
-            extra_parts: row.extraParts,
-          })),
-        },
-      });
+        target_weights: allocationMode === "target" ? targetWeights : null,
+        lines: accountAllocationRows.map((row) => ({
+          holding_id: row.holding.id,
+          instrument_id: row.holding.instrument_id,
+          instrument_symbol: row.holding.instrumentSymbol,
+          weight: row.weight,
+          extra_amount: row.extraAmount,
+          extra_parts: row.extraParts,
+        })),
+      },
+    };
+
+    try {
+      const { error } = await supabase
+        .from("investment_goals")
+        .insert([payload])
+        .select("id")
+        .single();
 
       if (error) {
-        console.error(error);
-        setAccountGoalMessage(
-          "Erreur lors de l’enregistrement de l’objectif de compte."
-        );
+        console.error("insert account goal error:", error);
+        setAccountGoalMessage(explainSupabaseError(error));
       } else {
-        setAccountGoalMessage(
-          "Objectif de compte enregistré dans votre tableau de bord ✨"
-        );
+        setAccountGoalMessage("Objectif de compte enregistré dans votre tableau de bord ✨");
       }
     } finally {
       setSavingAccountGoal(false);
@@ -718,46 +651,17 @@ export default function Simulation() {
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
-          <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
-            OLYMPE
-          </p>
-          <p className="text-xs text-white/50 -mt-1">
-            {userEmail || "Finance dashboard"}
-          </p>
+          <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">OLYMPE</p>
+          <p className="text-xs text-white/50 -mt-1">{userEmail || "Finance dashboard"}</p>
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <SidebarItem
-            icon={Home}
-            label="Tableau de bord"
-            onClick={() => navigate("/dashboard")}
-          />
-          <SidebarItem
-            icon={Wallet}
-            label="Comptes & placements"
-            onClick={() => navigate("/accounts")}
-          />
-          <SidebarItem
-            icon={BarChart3}
-            label="Analyse"
-            onClick={() => navigate("/analyse")}
-          />
-          <SidebarItem
-            icon={PieChart}
-            label="Portefeuille"
-            onClick={() => navigate("/portefeuille")}
-          />
-          <SidebarItem
-            icon={Sparkles}
-            label="Simulation"
-            active
-            onClick={() => navigate("/simulation")}
-          />
-          <SidebarItem
-            icon={GraduationCap}
-            label="Glossaire"
-            onClick={() => navigate("/glossaire")}
-          />
+          <SidebarItem icon={Home} label="Tableau de bord" onClick={() => navigate("/dashboard")} />
+          <SidebarItem icon={Wallet} label="Comptes & placements" onClick={() => navigate("/accounts")} />
+          <SidebarItem icon={BarChart3} label="Analyse" onClick={() => navigate("/analyse")} />
+          <SidebarItem icon={PieChart} label="Portefeuille" onClick={() => navigate("/portefeuille")} />
+          <SidebarItem icon={Sparkles} label="Simulation" active onClick={() => navigate("/simulation")} />
+          <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">
@@ -784,12 +688,8 @@ export default function Simulation() {
         {/* HEADER */}
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-400">
-              Simulation
-            </p>
-            <p className="text-sm text-gray-700">
-              Projetez vos placements et créez des objectifs personnalisés.
-            </p>
+            <p className="text-xs uppercase tracking-[0.25em] text-gray-400">Simulation</p>
+            <p className="text-sm text-gray-700">Projetez vos placements et créez des objectifs personnalisés.</p>
           </div>
           <p className="text-xs text-gray-500">
             {new Date().toLocaleDateString("fr-FR", {
@@ -811,37 +711,17 @@ export default function Simulation() {
             <>
               {/* 1️⃣ Scénarios + graph + objectif global */}
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Profils + scénarios */}
                 <div className="xl:col-span-2 space-y-4">
-                  {/* Profils types */}
                   <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                    <h2 className="text-sm font-semibold text-gray-800 mb-1">
-                      Profils types
-                    </h2>
+                    <h2 className="text-sm font-semibold text-gray-800 mb-1">Profils types</h2>
                     <p className="text-xs text-gray-500 mb-3">
-                      Appliquez un profil à votre scénario A (simple preset,
-                      vous pouvez ensuite ajuster).
+                      Appliquez un profil à votre scénario A (preset), puis ajustez.
                     </p>
                     <div className="flex flex-wrap gap-2 text-xs">
                       {[
-                        {
-                          id: "prudent",
-                          label: "Prudent • 3%/an • 8 ans",
-                          r: 3,
-                          y: 8,
-                        },
-                        {
-                          id: "equilibre",
-                          label: "Équilibré • 5%/an • 12 ans",
-                          r: 5,
-                          y: 12,
-                        },
-                        {
-                          id: "dynamique",
-                          label: "Dynamique • 7%/an • 15 ans",
-                          r: 7,
-                          y: 15,
-                        },
+                        { id: "prudent", label: "Prudent • 3%/an • 8 ans", r: 3, y: 8 },
+                        { id: "equilibre", label: "Équilibré • 5%/an • 12 ans", r: 5, y: 12 },
+                        { id: "dynamique", label: "Dynamique • 7%/an • 15 ans", r: 7, y: 15 },
                       ].map((p) => (
                         <button
                           key={p.id}
@@ -860,35 +740,25 @@ export default function Simulation() {
                     </div>
                   </div>
 
-                  {/* Scénario A + B formulaires */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <ScenarioCard
                       title="Scénario A"
                       scenario={scenarioA}
-                      onChange={(field, value) =>
-                        updateScenario("A", field, value)
-                      }
+                      onChange={(field, value) => updateScenario("A", field, value)}
                       accent
                     />
                     <ScenarioCard
                       title="Scénario B"
                       scenario={scenarioB}
-                      onChange={(field, value) =>
-                        updateScenario("B", field, value)
-                      }
+                      onChange={(field, value) => updateScenario("B", field, value)}
                     />
                   </div>
 
-                  {/* Graph */}
                   <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col h-[320px]">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h2 className="text-sm font-semibold text-gray-800">
-                          Évolution simulée dans le temps
-                        </h2>
-                        <p className="text-xs text-gray-500">
-                          Projection annuelle de la valeur de vos placements.
-                        </p>
+                        <h2 className="text-sm font-semibold text-gray-800">Évolution simulée dans le temps</h2>
+                        <p className="text-xs text-gray-500">Projection annuelle de la valeur de vos placements.</p>
                       </div>
                     </div>
                     <div className="relative flex-1">
@@ -898,8 +768,7 @@ export default function Simulation() {
                           <Line data={simChartData} options={simChartOptions} />
                         ) : (
                           <div className="flex h-full items-center justify-center text-xs text-gray-400 text-center px-4">
-                            Renseignez au moins un scénario pour afficher la
-                            simulation.
+                            Renseignez au moins un scénario pour afficher la simulation.
                           </div>
                         )}
                       </div>
@@ -907,75 +776,47 @@ export default function Simulation() {
                   </div>
                 </div>
 
-                {/* Résumé + objectif global */}
                 <div className="space-y-4">
-                  {/* Résumé A/B */}
                   <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
-                    <h2 className="text-sm font-semibold text-gray-800">
-                      Résumé des scénarios
-                    </h2>
+                    <h2 className="text-sm font-semibold text-gray-800">Résumé des scénarios</h2>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="space-y-1">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
-                          Scénario A
-                        </p>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {formatCurrency0(finalA)}
-                        </p>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">Scénario A</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatCurrency0(finalA)}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
-                          Scénario B
-                        </p>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {formatCurrency0(finalB)}
-                        </p>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">Scénario B</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatCurrency0(finalB)}</p>
                       </div>
                     </div>
+
                     <div className="text-xs text-gray-700">
                       {finalA > 0 && finalB > 0 ? (
                         <>
                           À horizon{" "}
                           <span className="font-semibold">
-                            {Math.max(
-                              parseScenarioForSim(scenarioA).years,
-                              parseScenarioForSim(scenarioB).years
-                            )}{" "}
-                            ans
+                            {Math.max(parseScenarioForSim(scenarioA).years, parseScenarioForSim(scenarioB).years)} ans
                           </span>
                           , le scénario B génère{" "}
-                          <span
-                            className={
-                              diffAB >= 0
-                                ? "font-semibold text-emerald-600"
-                                : "font-semibold text-red-500"
-                            }
-                          >
+                          <span className={diffAB >= 0 ? "font-semibold text-emerald-600" : "font-semibold text-red-500"}>
                             {diffAB >= 0 ? "+" : ""}
                             {formatCurrency0(diffAB)}
                           </span>{" "}
-                          de différence par rapport au scénario A.
+                          de différence.
                         </>
                       ) : (
-                        <span className="text-gray-400">
-                          Complétez les paramètres pour comparer les scénarios.
-                        </span>
+                        <span className="text-gray-400">Complétez les paramètres pour comparer les scénarios.</span>
                       )}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-2">
-                      Ces simulations sont pédagogiques et ne constituent pas un
-                      conseil en investissement.
+                      Ces simulations sont pédagogiques et ne constituent pas un conseil en investissement.
                     </p>
                   </div>
 
-                  {/* Objectif global */}
                   <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
-                    <h2 className="text-sm font-semibold text-gray-800">
-                      Enregistrer comme objectif global
-                    </h2>
+                    <h2 className="text-sm font-semibold text-gray-800">Enregistrer comme objectif global</h2>
                     <p className="text-xs text-gray-500">
-                      L’objectif sera basé sur le scénario A et visible dans
-                      votre tableau de bord.
+                      L’objectif sera basé sur le scénario A et visible dans votre tableau de bord.
                     </p>
 
                     <div className="space-y-2 text-xs">
@@ -984,23 +825,18 @@ export default function Simulation() {
                         <input
                           type="text"
                           value={globalGoalTitle}
-                          onChange={(e) =>
-                            setGlobalGoalTitle(e.target.value)
-                          }
+                          onChange={(e) => setGlobalGoalTitle(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                           placeholder="ex : Objectif PEA 2035"
                         />
                       </div>
+
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Montant cible (en €)
-                        </label>
+                        <label className="text-gray-600">Montant cible (en €)</label>
                         <input
                           type="number"
                           value={globalGoalTarget}
-                          onChange={(e) =>
-                            setGlobalGoalTarget(e.target.value)
-                          }
+                          onChange={(e) => setGlobalGoalTarget(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                           placeholder="ex : 20000"
                         />
@@ -1012,16 +848,10 @@ export default function Simulation() {
                       disabled={savingGlobalGoal}
                       className="mt-3 inline-flex items-center justify-center px-3 py-2 rounded-full text-xs font-medium bg-[#0F1013] text-white hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition"
                     >
-                      {savingGlobalGoal
-                        ? "Enregistrement..."
-                        : "Enregistrer cet objectif"}
+                      {savingGlobalGoal ? "Enregistrement..." : "Enregistrer cet objectif"}
                     </button>
 
-                    {globalGoalMessage && (
-                      <p className="text-[11px] text-gray-500 mt-2">
-                        {globalGoalMessage}
-                      </p>
-                    )}
+                    {globalGoalMessage && <p className="text-[11px] text-gray-500 mt-2">{globalGoalMessage}</p>}
                   </div>
                 </div>
               </section>
@@ -1030,28 +860,21 @@ export default function Simulation() {
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Objectif par ligne */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
-                  <h2 className="text-sm font-semibold text-gray-800">
-                    Objectif sur une ligne
-                  </h2>
-                  <p className="text-xs text-gray-500">
-                    Choisissez un placement existant et un montant cible.
-                  </p>
+                  <h2 className="text-sm font-semibold text-gray-800">Objectif sur une ligne</h2>
+                  <p className="text-xs text-gray-500">Choisissez un placement existant et un montant cible.</p>
 
                   <div className="space-y-3 text-xs">
                     <div className="space-y-1">
                       <label className="text-gray-600">Placement</label>
                       <select
                         value={selectedHoldingId}
-                        onChange={(e) =>
-                          setSelectedHoldingId(e.target.value)
-                        }
+                        onChange={(e) => setSelectedHoldingId(e.target.value)}
                         className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                       >
                         <option value="">Sélectionner une ligne...</option>
                         {holdingsWithMeta.map((h) => (
                           <option key={h.id} value={h.id}>
-                            {h.instrumentName || h.asset_label || "—"} •{" "}
-                            {h.accountName || "Compte"}
+                            {h.instrumentName || h.asset_label || "—"} • {h.accountName || "Compte"}
                           </option>
                         ))}
                       </select>
@@ -1063,17 +886,13 @@ export default function Simulation() {
                         <input
                           type="number"
                           value={lineTargetAmount}
-                          onChange={(e) =>
-                            setLineTargetAmount(e.target.value)
-                          }
+                          onChange={(e) => setLineTargetAmount(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                           placeholder="ex : 2000"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Durée (années)
-                        </label>
+                        <label className="text-gray-600">Durée (années)</label>
                         <input
                           type="number"
                           value={lineYears}
@@ -1083,26 +902,17 @@ export default function Simulation() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Rendement (%/an)
-                        </label>
+                        <label className="text-gray-600">Rendement (%/an)</label>
                         <input
                           type="number"
                           value={lineReturnInput}
-                          onChange={(e) =>
-                            setLineReturnInput(e.target.value)
-                          }
+                          onChange={(e) => setLineReturnInput(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
-                          placeholder={
-                            autoLineReturn !== null
-                              ? `ex : ${autoLineReturn.toFixed(1)}`
-                              : "ex : 6"
-                          }
+                          placeholder={autoLineReturn !== null ? `ex : ${autoLineReturn.toFixed(1)}` : "ex : 6"}
                         />
                         {autoLineReturn !== null && (
                           <p className="text-[10px] text-gray-400">
-                            Rendement estimé de cette ligne :{" "}
-                            {autoLineReturn.toFixed(1)} %/an (approx.).
+                            Rendement estimé de cette ligne : {autoLineReturn.toFixed(1)} %/an (approx.).
                           </p>
                         )}
                       </div>
@@ -1111,33 +921,18 @@ export default function Simulation() {
                     <div className="text-xs text-gray-700 space-y-1">
                       {selectedHolding ? (
                         <>
+                          <p>Valeur actuelle : {formatCurrency0(selectedHolding.currentValue)}</p>
                           <p>
-                            Valeur actuelle :{" "}
-                            {formatCurrency0(selectedHolding.currentValue)}
-                          </p>
-                          <p>
-                            Pour viser{" "}
-                            {formatCurrency0(toNumber(lineTargetAmount))} dans{" "}
-                            {toNumber(lineYears) || 0} ans avec un rendement de{" "}
-                            {effectiveLineReturn
-                              ? `${effectiveLineReturn.toFixed(1)} %/an`
-                              : "0 %/an"}
-                            , vous devriez investir environ{" "}
-                            <span className="font-semibold">
-                              {formatCurrency0(lineExtraNow)}
-                            </span>{" "}
-                            aujourd’hui, soit environ{" "}
-                            <span className="font-semibold">
-                              {lineExtraShares.toFixed(2)} parts
-                            </span>{" "}
-                            supplémentaires.
+                            Pour viser {formatCurrency0(toNumber(lineTargetAmount))} dans {toNumber(lineYears) || 0} ans
+                            avec un rendement de{" "}
+                            {effectiveLineReturn ? `${effectiveLineReturn.toFixed(1)} %/an` : "0 %/an"}, vous devriez
+                            investir environ{" "}
+                            <span className="font-semibold">{formatCurrency0(lineExtraNow)}</span> aujourd’hui, soit
+                            environ <span className="font-semibold">{lineExtraShares.toFixed(2)} parts</span>.
                           </p>
                         </>
                       ) : (
-                        <p className="text-gray-400">
-                          Sélectionnez une ligne pour voir le calcul
-                          d’objectif.
-                        </p>
+                        <p className="text-gray-400">Sélectionnez une ligne pour voir le calcul d’objectif.</p>
                       )}
                     </div>
                   </div>
@@ -1147,36 +942,24 @@ export default function Simulation() {
                     disabled={savingLineGoal || !selectedHolding}
                     className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-full text-xs font-medium bg-[#0F1013] text-white hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition"
                   >
-                    {savingLineGoal
-                      ? "Enregistrement..."
-                      : "Enregistrer cet objectif de ligne"}
+                    {savingLineGoal ? "Enregistrement..." : "Enregistrer cet objectif de ligne"}
                   </button>
 
-                  {lineGoalMessage && (
-                    <p className="text-[11px] text-gray-500 mt-2">
-                      {lineGoalMessage}
-                    </p>
-                  )}
+                  {lineGoalMessage && <p className="text-[11px] text-gray-500 mt-2">{lineGoalMessage}</p>}
                 </div>
 
                 {/* Objectif par compte */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-sm font-semibold text-gray-800">
-                        Objectif sur un compte
-                      </h2>
-                      <p className="text-xs text-gray-500">
-                        Choisissez un compte, un montant cible et un rendement.
-                      </p>
+                      <h2 className="text-sm font-semibold text-gray-800">Objectif sur un compte</h2>
+                      <p className="text-xs text-gray-500">Choisissez un compte, un montant cible et un rendement.</p>
                     </div>
                     <div className="flex bg-gray-100 rounded-full p-1 text-[11px]">
                       <button
                         onClick={() => setAllocationMode("current")}
                         className={`px-3 py-1 rounded-full transition ${
-                          allocationMode === "current"
-                            ? "bg-white shadow-sm text-gray-900"
-                            : "text-gray-500"
+                          allocationMode === "current" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                         }`}
                       >
                         Proportions actuelles
@@ -1184,9 +967,7 @@ export default function Simulation() {
                       <button
                         onClick={() => setAllocationMode("target")}
                         className={`px-3 py-1 rounded-full transition ${
-                          allocationMode === "target"
-                            ? "bg-white shadow-sm text-gray-900"
-                            : "text-gray-500"
+                          allocationMode === "target" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                         }`}
                       >
                         Répartition cible
@@ -1216,23 +997,17 @@ export default function Simulation() {
 
                     <div className="grid grid-cols-3 gap-3">
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Montant cible
-                        </label>
+                        <label className="text-gray-600">Montant cible</label>
                         <input
                           type="number"
                           value={accountTargetAmount}
-                          onChange={(e) =>
-                            setAccountTargetAmount(e.target.value)
-                          }
+                          onChange={(e) => setAccountTargetAmount(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                           placeholder="ex : 20000"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Durée (années)
-                        </label>
+                        <label className="text-gray-600">Durée (années)</label>
                         <input
                           type="number"
                           value={accountYears}
@@ -1242,15 +1017,11 @@ export default function Simulation() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-gray-600">
-                          Rendement (%/an)
-                        </label>
+                        <label className="text-gray-600">Rendement (%/an)</label>
                         <input
                           type="number"
                           value={accountReturnInput}
-                          onChange={(e) =>
-                            setAccountReturnInput(e.target.value)
-                          }
+                          onChange={(e) => setAccountReturnInput(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                           placeholder={
                             allocationMode === "current"
@@ -1267,14 +1038,10 @@ export default function Simulation() {
                             Rendement estimé du compte :{" "}
                             {allocationMode === "current"
                               ? autoReturnCurrent !== null
-                                ? `${autoReturnCurrent.toFixed(
-                                    1
-                                  )} % (moyenne pondérée des lignes actuelles)`
+                                ? `${autoReturnCurrent.toFixed(1)} % (moyenne pondérée actuelle)`
                                 : "non disponible"
                               : autoReturnTarget !== null
-                              ? `${autoReturnTarget.toFixed(
-                                  1
-                                )} % (pondéré par la répartition cible)`
+                              ? `${autoReturnTarget.toFixed(1)} % (pondéré par la répartition cible)`
                               : "saisissez une répartition cible pour estimer."}
                           </p>
                         )}
@@ -1285,98 +1052,59 @@ export default function Simulation() {
                       <>
                         <p className="text-xs text-gray-700">
                           Valeur actuelle du compte :{" "}
-                          <span className="font-semibold">
-                            {formatCurrency0(accountCurrentValue)}
-                          </span>
+                          <span className="font-semibold">{formatCurrency0(accountCurrentValue)}</span>
                         </p>
                         <p className="text-xs text-gray-700">
-                          Capital supplémentaire total estimé à investir
-                          aujourd’hui pour viser{" "}
-                          {formatCurrency0(toNumber(accountTargetAmount))} dans{" "}
-                          {toNumber(accountYears) || 0} ans avec{" "}
-                          {effectiveAccountReturn.toFixed(1)} %/an :{" "}
-                          <span className="font-semibold">
-                            {formatCurrency0(accountExtraNow)}
-                          </span>
-                          .
+                          Capital supplémentaire estimé pour viser {formatCurrency0(toNumber(accountTargetAmount))} dans{" "}
+                          {toNumber(accountYears) || 0} ans avec {effectiveAccountReturn.toFixed(1)} %/an :{" "}
+                          <span className="font-semibold">{formatCurrency0(accountExtraNow)}</span>.
                         </p>
                       </>
                     )}
 
-                    {/* Répartition par ligne */}
                     {selectedAccount && (
                       <div className="border-t border-gray-100 pt-3 mt-2 space-y-2">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
-                          Répartition par ligne :
-                        </p>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">Répartition par ligne :</p>
                         {accountHoldings.length === 0 ? (
-                          <p className="text-xs text-gray-400">
-                            Aucun placement sur ce compte.
-                          </p>
+                          <p className="text-xs text-gray-400">Aucun placement sur ce compte.</p>
                         ) : (
                           <div className="space-y-2">
                             {accountHoldings.map((h) => {
-                              const row = accountAllocationRows.find(
-                                (r) => r.holding.id === h.id
-                              );
-                              const currentWeight =
-                                accountCurrentValue > 0
-                                  ? (h.currentValue / accountCurrentValue) *
-                                    100
-                                  : 0;
-
+                              const row = accountAllocationRows.find((r) => r.holding.id === h.id);
+                              const currentWeight = accountCurrentValue > 0 ? (h.currentValue / accountCurrentValue) * 100 : 0;
                               const targetValue = targetWeights[h.id] || "";
 
                               return (
-                                <div
-                                  key={h.id}
-                                  className="flex justify-between items-start text-xs"
-                                >
+                                <div key={h.id} className="flex justify-between items-start text-xs">
                                   <div>
-                                    <p className="font-medium text-gray-800">
-                                      {h.instrumentName ||
-                                        h.asset_label ||
-                                        "Placement"}
-                                    </p>
+                                    <p className="font-medium text-gray-800">{h.instrumentName || h.asset_label || "Placement"}</p>
                                     <p className="text-[11px] text-gray-500">
-                                      {formatCurrency0(h.currentValue)} • poids{" "}
-                                      {currentWeight.toFixed(1)} %
+                                      {formatCurrency0(h.currentValue)} • poids {currentWeight.toFixed(1)} %
                                     </p>
 
                                     {allocationMode === "target" && (
                                       <div className="mt-1 flex items-center gap-2">
-                                        <span className="text-[11px] text-gray-500">
-                                          Cible :
-                                        </span>
+                                        <span className="text-[11px] text-gray-500">Cible :</span>
                                         <input
                                           type="number"
                                           value={targetValue}
-                                          onChange={(e) =>
-                                            handleTargetWeightChange(
-                                              h.id,
-                                              e.target.value
-                                            )
-                                          }
+                                          onChange={(e) => handleTargetWeightChange(h.id, e.target.value)}
                                           className="w-20 rounded-full border border-gray-200 px-2 py-1 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                                           placeholder="ex : 33"
                                         />
-                                        <span className="text-[11px] text-gray-500">
-                                          %
-                                        </span>
+                                        <span className="text-[11px] text-gray-500">%</span>
                                       </div>
                                     )}
                                   </div>
+
                                   <div className="text-right text-[11px] text-gray-600">
                                     {row ? (
                                       <p>
-                                        + {row.extraParts.toFixed(2)} parts (
-                                        {formatCurrency0(row.extraAmount)})
+                                        + {row.extraParts.toFixed(2)} parts ({formatCurrency0(row.extraAmount)})
                                       </p>
                                     ) : (
                                       <p className="text-gray-400">
-                                        {accountExtraNow <= 0
-                                          ? "Aucun apport nécessaire."
-                                          : "Aucune répartition calculée."}
+                                        {accountExtraNow <= 0 ? "Aucun apport nécessaire." : "Aucune répartition calculée."}
                                       </p>
                                     )}
                                   </div>
@@ -1394,16 +1122,10 @@ export default function Simulation() {
                     disabled={savingAccountGoal || !selectedAccount}
                     className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-full text-xs font-medium bg-[#0F1013] text-white hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition"
                   >
-                    {savingAccountGoal
-                      ? "Enregistrement..."
-                      : "Enregistrer cet objectif de compte"}
+                    {savingAccountGoal ? "Enregistrement..." : "Enregistrer cet objectif de compte"}
                   </button>
 
-                  {accountGoalMessage && (
-                    <p className="text-[11px] text-gray-500 mt-2">
-                      {accountGoalMessage}
-                    </p>
-                  )}
+                  {accountGoalMessage && <p className="text-[11px] text-gray-500 mt-2">{accountGoalMessage}</p>}
                 </div>
               </section>
             </>
@@ -1421,9 +1143,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
-        active
-          ? "bg-white/5 text-white"
-          : "text-white/60 hover:bg-white/5 hover:text-white"
+        active ? "bg-white/5 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
       } transition`}
     >
       <Icon size={16} />
@@ -1436,14 +1156,13 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
   return (
     <div
       className={`rounded-2xl border p-5 flex flex-col gap-3 ${
-        accent
-          ? "border-[#D4AF37] bg-[#FFFBEB]"
-          : "border-gray-200 bg-gray-50"
+        accent ? "border-[#D4AF37] bg-[#FFFBEB]" : "border-gray-200 bg-gray-50"
       }`}
     >
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
       </div>
+
       <div className="grid grid-cols-2 gap-3 text-xs">
         <div className="space-y-1">
           <label className="text-gray-600">Capital de départ</label>
@@ -1455,6 +1174,7 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
             placeholder="ex : 5000"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-gray-600">Versement mensuel</label>
           <input
@@ -1465,6 +1185,7 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
             placeholder="ex : 200"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-gray-600">Durée (années)</label>
           <input
@@ -1475,6 +1196,7 @@ function ScenarioCard({ title, scenario, onChange, accent }) {
             placeholder="ex : 15"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-gray-600">Rendement annuel (%)</label>
           <input

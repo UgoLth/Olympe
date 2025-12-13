@@ -42,6 +42,27 @@ ChartJS.register(
 const toNumber = (v) =>
   v === null || v === undefined || v === "" ? 0 : Number(v);
 
+// ✅ timezone unique pour les "jours"
+const APP_TZ = "Europe/Paris";
+
+// ✅ dayKey "YYYY-MM-DD" DANS LE TIMEZONE APP_TZ (PAS via toISOString)
+const getDayKeyInTZ = (date, timeZone = APP_TZ) => {
+  const d = date instanceof Date ? date : new Date(date);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const da = parts.find((p) => p.type === "day")?.value;
+  return `${y}-${m}-${da}`;
+};
+
+// ✅ Date stable à partir d'un dayKey (on prend midi UTC pour éviter les décalages)
+const dateFromDayKey = (dayKey) => new Date(`${dayKey}T12:00:00.000Z`);
+
 // % de perf entre un prix courant et un prix de référence
 const computeReturnPct = (current, reference) => {
   const c = toNumber(current);
@@ -349,7 +370,10 @@ export default function Analyse() {
       let prev1dByInstrument = {};
       let prev30dByInstrument = {};
       let prevYtdByInstrument = {};
-      let historicalPricesByInstrument = {};
+
+      // ✅ 1 point/jour en "Europe/Paris"
+      let historicalPricesByInstrument = {}; // { [instrumentId]: [{date, price, dayKey}] }
+      let dailyPriceMapByInstrument = {}; // { [instrumentId]: Map(dayKey -> price) }
 
       if (instrumentIds.length > 0) {
         const now = new Date();
@@ -447,38 +471,43 @@ export default function Analyse() {
           .order("fetched_at", { ascending: true });
 
         if (historyPrices && historyPrices.length > 0) {
-          // 👉 Regroupement par instrument + jour : 1 "clôture" par jour
-          const perInstrumentPerDay = {};
+          // ✅ Regroupement par instrument + jour (Europe/Paris) : 1 "clôture" par jour
+          // (données triées asc => on garde la dernière quote du jour)
+          const perInstrumentPerDay = {}; // key: `${id}_${dayKey}` -> { instrumentId, dayKey, date, price }
 
           for (const p of historyPrices) {
             const id = p.instrument_id;
-            const d = new Date(p.fetched_at);
-            const dayKey = d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+            const dayKey = getDayKeyInTZ(p.fetched_at, APP_TZ);
             const key = `${id}_${dayKey}`;
 
-            // Les données sont triées asc, donc on garde la dernière quote du jour
             perInstrumentPerDay[key] = {
               instrumentId: id,
-              date: new Date(dayKey), // date normalisée au jour
+              dayKey,
+              date: dateFromDayKey(dayKey),
               price: toNumber(p.price),
             };
           }
 
-          // On reconstruit historicalPricesByInstrument avec 1 point/jour
+          // Reconstruit historicalPricesByInstrument (1 point/jour)
           historicalPricesByInstrument = {};
           Object.values(perInstrumentPerDay).forEach((row) => {
-            const { instrumentId, date, price } = row;
+            const { instrumentId, dayKey, date, price } = row;
             if (!historicalPricesByInstrument[instrumentId]) {
               historicalPricesByInstrument[instrumentId] = [];
             }
-            historicalPricesByInstrument[instrumentId].push({ date, price });
+            historicalPricesByInstrument[instrumentId].push({ dayKey, date, price });
           });
 
-          // On s'assure que chaque série est triée
+          // Tri + map pour lookup O(1)
+          dailyPriceMapByInstrument = {};
           Object.keys(historicalPricesByInstrument).forEach((id) => {
-            historicalPricesByInstrument[id].sort(
-              (a, b) => a.date - b.date
-            );
+            historicalPricesByInstrument[id].sort((a, b) => a.date - b.date);
+
+            const m = new Map();
+            for (const pt of historicalPricesByInstrument[id]) {
+              m.set(pt.dayKey, pt.price);
+            }
+            dailyPriceMapByInstrument[id] = m;
           });
         }
       }
@@ -555,43 +584,41 @@ export default function Analyse() {
         standaloneAccounts.length > 0
       ) {
         const now = new Date();
-        now.setHours(0, 0, 0, 0); // on travaille en jours entiers
 
         const earliestAccountDate =
           accounts && accounts.length > 0
             ? new Date(accounts[0].created_at)
             : now;
 
-        earliestAccountDate.setHours(0, 0, 0, 0);
-
         const msPerDay = 24 * 60 * 60 * 1000;
-        const daysDiff = Math.floor(
-          (now.getTime() - earliestAccountDate.getTime()) / msPerDay
-        );
 
-        // dernière valeur connue de chaque instrument
+        // ✅ on calcule le nombre de jours via des dayKey (Paris) pour éviter les décalages UTC/local
+        const startKey = getDayKeyInTZ(earliestAccountDate, APP_TZ);
+        const endKey = getDayKeyInTZ(now, APP_TZ);
+
+        // construit une liste de dayKey entre startKey et endKey (inclus)
+        const dayKeys = [];
+        {
+          // on itère sur une Date "pivot" en UTC midi pour ne pas sauter des jours
+          let cursor = dateFromDayKey(startKey);
+          const end = dateFromDayKey(endKey);
+          while (cursor.getTime() <= end.getTime()) {
+            dayKeys.push(getDayKeyInTZ(cursor, APP_TZ));
+            cursor = new Date(cursor.getTime() + msPerDay);
+          }
+        }
+
+        // dernière valeur connue de chaque instrument (carry-forward)
         const lastKnownPriceByInstrument = {};
 
-        for (let offset = 0; offset <= daysDiff; offset++) {
-          const dayStart = new Date(
-            earliestAccountDate.getTime() + offset * msPerDay
-          );
-          dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date(dayStart);
-          dayEnd.setHours(23, 59, 59, 999);
-
-          const dayKey = dayStart.toISOString().slice(0, 10);
-
-          // on met à jour à partir des séries "1 point/jour"
-          (instrumentIds || []).forEach((instId) => {
-            const history = historicalPricesByInstrument[instId] || [];
-            const pointForDay = history.find(
-              (h) => h.date.toISOString().slice(0, 10) === dayKey
-            );
-            if (pointForDay) {
-              lastKnownPriceByInstrument[instId] = pointForDay.price;
-            }
-          });
+        for (const dayKey of dayKeys) {
+          // ✅ update des lastKnown depuis la map "1 point/jour"
+          for (const instId of instrumentIds || []) {
+            const m = dailyPriceMapByInstrument[instId];
+            if (!m) continue;
+            const p = m.get(dayKey);
+            if (p !== undefined) lastKnownPriceByInstrument[instId] = p;
+          }
 
           let portfolioValueForDay = 0;
 
@@ -613,7 +640,7 @@ export default function Analyse() {
           });
 
           dailyHistory.push({
-            date: dayEnd, // fin de journée
+            date: dateFromDayKey(dayKey), // date stable pour l’affichage
             value: portfolioValueForDay,
           });
         }
@@ -793,10 +820,7 @@ export default function Analyse() {
   };
 
   // ---------- COURBE (avec multi-périodes) ----------
-  const performanceHistoryData = buildHistoryDataset(
-    portfolioHistory,
-    historyMode
-  );
+  const performanceHistoryData = buildHistoryDataset(portfolioHistory, historyMode);
 
   const historyModeLabel = {
     day: "Journalier",
@@ -860,9 +884,7 @@ export default function Analyse() {
   };
 
   // 1) Volatilité : écart-type des rendements journaliers (%)
-  const sortedHistory = [...portfolioHistory].sort(
-    (a, b) => a.date - b.date
-  );
+  const sortedHistory = [...portfolioHistory].sort((a, b) => a.date - b.date);
   const dailyReturns = [];
   for (let i = 1; i < sortedHistory.length; i++) {
     const prev = sortedHistory[i - 1].value;
@@ -909,10 +931,7 @@ export default function Analyse() {
   // 3) Diversification : basé sur le poids de la plus grosse ligne
   const maxWeightPct =
     holdings.length > 0
-      ? holdings.reduce(
-          (m, h) => (h.allocationPct > m ? h.allocationPct : m),
-          0
-        )
+      ? holdings.reduce((m, h) => (h.allocationPct > m ? h.allocationPct : m), 0)
       : 0;
   let diversificationScore = 0;
   if (maxWeightPct === 0) {
@@ -936,8 +955,7 @@ export default function Analyse() {
       : "Portefeuille bien diversifié";
 
   // 4) Liquidité : % de liquidités dans le donut
-  const cashEntry =
-    assetAllocations.find((a) => a.label === "Liquidités") || null;
+  const cashEntry = assetAllocations.find((a) => a.label === "Liquidités") || null;
   const cashPct = cashEntry ? cashEntry.percent : 0;
   let liquidityScore = 0;
   if (cashPct === 0) {
@@ -1006,12 +1024,7 @@ export default function Analyse() {
     datasets: [
       {
         label: "Profil de risque",
-        data: [
-          volatilityScore,
-          diversificationScore,
-          liquidityScore,
-          horizonScore,
-        ],
+        data: [volatilityScore, diversificationScore, liquidityScore, horizonScore],
         borderColor: "#D4AF37",
         backgroundColor: "rgba(212,175,55,0.16)",
         borderWidth: 2,
@@ -1067,9 +1080,7 @@ export default function Analyse() {
     holdings.length > 0
       ? holdings.reduce(
           (best, h) =>
-            best === null || h.monthlyChangePct > best.monthlyChangePct
-              ? h
-              : best,
+            best === null || h.monthlyChangePct > best.monthlyChangePct ? h : best,
           null
         )
       : null;
@@ -1095,22 +1106,16 @@ export default function Analyse() {
     const priceHistory = instrumentHistoryMap[holding.instrumentId];
     if (!priceHistory || !priceHistory.length) return null;
 
-    const sortedPriceHistory = [...priceHistory].sort(
-      (a, b) => a.date - b.date
-    );
+    const sortedPriceHistory = [...priceHistory].sort((a, b) => a.date - b.date);
 
     const data = [];
     let j = 0;
     let lastPrice = sortedPriceHistory[0].price;
 
     basePoints.forEach((point) => {
-      // on considère la fin de journée
       const dayDate = point.date;
 
-      while (
-        j < sortedPriceHistory.length &&
-        sortedPriceHistory[j].date <= dayDate
-      ) {
+      while (j < sortedPriceHistory.length && sortedPriceHistory[j].date <= dayDate) {
         lastPrice = sortedPriceHistory[j].price;
         j++;
       }
@@ -1126,29 +1131,20 @@ export default function Analyse() {
 
   if (sortedPortfolioHistory.length > 0) {
     if (comparisonMode === "week") {
-      const last =
-        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 6); // 7 jours glissants
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
+      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
     } else if (comparisonMode === "month") {
-      const last =
-        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 29); // 30 jours glissants
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
+      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
     } else if (comparisonMode === "year") {
-      const last =
-        sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
+      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 364); // ~1 an
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
+      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
     } else if (comparisonMode === "custom") {
       const start = comparisonStartDate ? new Date(comparisonStartDate) : null;
       const end = comparisonEndDate ? new Date(comparisonEndDate) : null;
@@ -1166,16 +1162,10 @@ export default function Analyse() {
     }
   }
 
-  const comparisonLabels = comparisonPoints.map((p) =>
-    formatDateShort(p.date)
-  );
+  const comparisonLabels = comparisonPoints.map((p) => formatDateShort(p.date));
 
-  const selectedObj1 = holdings.find(
-    (h) => String(h.id) === String(selectedHolding1)
-  );
-  const selectedObj2 = holdings.find(
-    (h) => String(h.id) === String(selectedHolding2)
-  );
+  const selectedObj1 = holdings.find((h) => String(h.id) === String(selectedHolding1));
+  const selectedObj2 = holdings.find((h) => String(h.id) === String(selectedHolding2));
 
   // 2) Séries en VALEUR €
   const series1Raw = selectedObj1
@@ -1409,25 +1399,19 @@ export default function Analyse() {
                 {[
                   {
                     label: "Performance totale",
-                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${
-                      summary.totalReturnPct
-                    } %`,
+                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${summary.totalReturnPct} %`,
                     subtitle: "Par rapport aux montants investis",
                     positive: summary.totalReturnPct >= 0,
                   },
                   {
                     label: "Performance YTD",
-                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${
-                      summary.ytdReturnPct
-                    } %`,
+                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${summary.ytdReturnPct} %`,
                     subtitle: "Depuis le 2 janvier",
                     positive: summary.ytdReturnPct >= 0,
                   },
                   {
                     label: "Sur 30 jours",
-                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${
-                      summary.monthReturnPct
-                    } %`,
+                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${summary.monthReturnPct} %`,
                     subtitle: "30 derniers jours",
                     positive: summary.monthReturnPct >= 0,
                   },
@@ -1463,8 +1447,7 @@ export default function Analyse() {
                         Évolution de la valeur du portefeuille
                       </h2>
                       <p className="text-xs text-gray-500">
-                        Vue {historyModeLabel.toLowerCase()} de la valeur totale
-                        estimée.
+                        Vue {historyModeLabel.toLowerCase()} de la valeur totale estimée.
                       </p>
                     </div>
 
@@ -1493,14 +1476,10 @@ export default function Analyse() {
                   </div>
 
                   <div className="relative flex-1 h-56">
-                    {/* petite lumière dorée derrière le graph */}
                     <div className="absolute inset-x-6 bottom-0 h-24 bg-gradient-to-t from-[#F5E7B3] via-transparent to-transparent opacity-40 pointer-events-none" />
                     <div className="relative h-full">
                       {performanceHistoryData ? (
-                        <Line
-                          data={performanceHistoryData}
-                          options={performanceHistoryOptions}
-                        />
+                        <Line data={performanceHistoryData} options={performanceHistoryOptions} />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-gray-400">
                           Impossible de calculer l’historique pour le moment.
@@ -1516,8 +1495,7 @@ export default function Analyse() {
                       Meilleure & pire ligne (30 jours)
                     </h2>
                     <p className="text-xs text-gray-500">
-                      Basé sur la performance à 30 jours des lignes de votre
-                      portefeuille.
+                      Basé sur la performance à 30 jours des lignes de votre portefeuille.
                     </p>
                   </div>
 
@@ -1531,9 +1509,7 @@ export default function Analyse() {
                       </p>
                       <p className="text-xs text-emerald-700 mt-1">
                         {bestHolding
-                          ? `+${Math.round(
-                              bestHolding.monthlyChangePct * 10
-                            ) / 10} %`
+                          ? `+${Math.round(bestHolding.monthlyChangePct * 10) / 10} %`
                           : "—"}
                       </p>
                     </div>
@@ -1547,19 +1523,14 @@ export default function Analyse() {
                       </p>
                       <p className="text-xs text-red-600 mt-1">
                         {worstHolding
-                          ? `${
-                              Math.round(worstHolding.monthlyChangePct * 10) /
-                              10
-                            } %`
+                          ? `${Math.round(worstHolding.monthlyChangePct * 10) / 10} %`
                           : "—"}
                       </p>
                     </div>
                   </div>
 
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Les performances sont calculées à partir des prix
-                    enregistrés dans Olympe et sont fournies à titre
-                    exclusivement pédagogique.
+                    Les performances sont calculées à partir des prix enregistrés dans Olympe et sont fournies à titre exclusivement pédagogique.
                   </p>
                 </div>
               </section>
@@ -1573,17 +1544,14 @@ export default function Analyse() {
                         Comparer deux placements
                       </h2>
                       <p className="text-xs text-gray-500">
-                        Visualisez l’évolution de la valeur ou de la
-                        performance de chaque ligne.
+                        Visualisez l’évolution de la valeur ou de la performance de chaque ligne.
                       </p>
                     </div>
 
                     {/* Sélection des 2 lignes */}
                     <div className="flex flex-col sm:flex-row gap-3">
                       <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-gray-500">
-                          Ligne 1
-                        </span>
+                        <span className="text-[11px] text-gray-500">Ligne 1</span>
                         <select
                           value={selectedHolding1}
                           onChange={(e) => setSelectedHolding1(e.target.value)}
@@ -1608,9 +1576,7 @@ export default function Analyse() {
                           onChange={(e) => setSelectedHolding2(e.target.value)}
                           className="text-xs border border-gray-200 rounded-full px-3 py-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                         >
-                          <option value="">
-                            Aucune / comparer plus tard
-                          </option>
+                          <option value="">Aucune / comparer plus tard</option>
                           {holdings.map((h) => (
                             <option key={h.id} value={h.id}>
                               {h.name}
@@ -1683,18 +1649,14 @@ export default function Analyse() {
                         <input
                           type="date"
                           value={comparisonStartDate}
-                          onChange={(e) =>
-                            setComparisonStartDate(e.target.value)
-                          }
+                          onChange={(e) => setComparisonStartDate(e.target.value)}
                           className="border border-gray-200 rounded-full px-3 py-1.5 text-xs bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                         />
                         <span className="text-gray-500">à :</span>
                         <input
                           type="date"
                           value={comparisonEndDate}
-                          onChange={(e) =>
-                            setComparisonEndDate(e.target.value)
-                          }
+                          onChange={(e) => setComparisonEndDate(e.target.value)}
                           className="border border-gray-200 rounded-full px-3 py-1.5 text-xs bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                         />
                       </div>
@@ -1707,15 +1669,13 @@ export default function Analyse() {
                     <Line data={comparisonData} options={comparisonOptions} />
                   ) : (
                     <div className="flex h-full items-center justify-center text-xs text-gray-400">
-                      Sélectionnez au moins une ligne pour afficher la
-                      comparaison.
+                      Sélectionnez au moins une ligne pour afficher la comparaison.
                     </div>
                   )}
                 </div>
 
                 <p className="mt-3 text-[11px] text-gray-400">
-                  En mode “Performance (%)”, chaque courbe démarre à 0&nbsp;% et
-                  montre la variation relative depuis le début de la période.
+                  En mode “Performance (%)”, chaque courbe démarre à 0&nbsp;% et montre la variation relative depuis le début de la période.
                 </p>
               </section>
 
@@ -1732,8 +1692,7 @@ export default function Analyse() {
                     </h2>
                     <p className="text-xs text-gray-500">
                       Basé sur la volatilité quotidienne de votre portefeuille,
-                      les plus fortes baisses historiques et la répartition de
-                      vos lignes.
+                      les plus fortes baisses historiques et la répartition de vos lignes.
                     </p>
 
                     <div className="space-y-2 text-xs text-gray-700">
@@ -1748,8 +1707,7 @@ export default function Analyse() {
                           Volatilité :
                         </span>{" "}
                         {riskProfile.volatilityLabel}{" "}
-                        {dailyReturns.length > 5 &&
-                          `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
+                        {dailyReturns.length > 5 && `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
                       </p>
                       <p>
                         <span className="font-semibold text-gray-900">
@@ -1772,9 +1730,7 @@ export default function Analyse() {
                     </div>
 
                     <p className="text-[11px] text-gray-400">
-                      Ces indicateurs sont calculés à partir des données
-                      enregistrées dans Olympe et ne constituent pas un conseil
-                      en investissement.
+                      Ces indicateurs sont calculés à partir des données enregistrées dans Olympe et ne constituent pas un conseil en investissement.
                     </p>
                   </div>
                 </div>
@@ -1785,8 +1741,7 @@ export default function Analyse() {
                     Analyse des principales lignes
                   </h2>
                   <p className="text-xs text-gray-500 mb-3">
-                    Top 5 des lignes les plus pondérées, avec leur poids dans le
-                    portefeuille et leur volatilité approximative.
+                    Top 5 des lignes les plus pondérées, avec leur poids dans le portefeuille et leur volatilité approximative.
                   </p>
 
                   <div className="overflow-hidden rounded-xl border border-gray-100">
@@ -1806,20 +1761,16 @@ export default function Analyse() {
                               colSpan={4}
                               className="px-3 py-4 text-center text-gray-400 text-[11px]"
                             >
-                              Pas encore assez de données pour analyser vos
-                              lignes.
+                              Pas encore assez de données pour analyser vos lignes.
                             </td>
                           </tr>
                         ) : (
                           holdingsAnalysisRows.map((h, index) => (
                             <motion.tr
-                              key={h.id} // ✅ clé unique
+                              key={h.id}
                               initial={{ opacity: 0, y: 6 }}
                               animate={{ opacity: 1, y: 0 }}
-                              transition={{
-                                delay: 0.03 * index,
-                                duration: 0.2,
-                              }}
+                              transition={{ delay: 0.03 * index, duration: 0.2 }}
                               className="group border-b border-gray-50 hover:bg-gray-50/60 transition"
                             >
                               <td className="px-3 py-2">
@@ -1905,8 +1856,7 @@ export default function Analyse() {
                     ))}
                     {assetAllocations.length === 0 && (
                       <p className="text-[11px] text-gray-400">
-                        Ajoutez des comptes et des placements pour voir votre
-                        allocation.
+                        Ajoutez des comptes et des placements pour voir votre allocation.
                       </p>
                     )}
                   </div>

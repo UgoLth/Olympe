@@ -2,6 +2,8 @@
   "dependencies": {
     "chart.js": "^4.5.1",
     "framer-motion": "^12.23.25",
-    "react-chartjs-2": "^5.3.1"
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^18.2.0"
   }
 }
