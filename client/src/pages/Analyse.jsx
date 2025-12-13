@@ -258,41 +258,65 @@ const buildHistoryDataset = (history, mode) => {
 };
 
 /**
- * ✅ NOUVELLE TABLE POUR LE COMPARATEUR : asset_prices_daily
- * On tente plusieurs noms de colonnes prix pour éviter que la page casse si ta table n'a pas "close_price".
- * Résultat normalisé: [{ instrument_id, day, price }]
+ * ✅ FIX ICI (et seulement ici)
+ * Avant: plusieurs selects sur des colonnes supposées -> 400 si colonne inexistante -> map vide -> aucune courbe
+ * Maintenant: 1 seul select("*") puis on déduit la colonne prix côté JS.
  */
 const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
-  const attempts = [
-    { col: "close_price", select: "instrument_id, day, close_price" },
-    { col: "close", select: "instrument_id, day, close" },
-    { col: "adj_close", select: "instrument_id, day, adj_close" },
-    { col: "price", select: "instrument_id, day, price" },
-    { col: "value", select: "instrument_id, day, value" },
-  ];
+  const { data, error } = await supabase
+    .from("asset_prices_daily")
+    .select("*")
+    .in("instrument_id", instrumentIds)
+    .gte("day", fromDayKey)
+    .order("day", { ascending: true });
 
-  let lastError = null;
+  if (error) throw error;
 
-  for (const a of attempts) {
-    const { data, error } = await supabase
-      .from("asset_prices_daily")
-      .select(a.select)
-      .in("instrument_id", instrumentIds)
-      .gte("day", fromDayKey)
-      .order("day", { ascending: true });
+  const pickPrice = (row) => {
+    const candidates = [
+      "close_price",
+      "close",
+      "adj_close",
+      "adjclose",
+      "adjusted_close",
+      "price",
+      "value",
+      "last",
+      "c",
+    ];
 
-    if (!error) {
-      return (data || []).map((r) => ({
-        instrument_id: r.instrument_id,
-        day: r.day, // "YYYY-MM-DD"
-        price: toNumber(r[a.col]),
-      }));
+    for (const k of candidates) {
+      const v = row?.[k];
+      const n = Number(v);
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
     }
 
-    lastError = error;
-  }
+    // fallback: premier champ numérique “plausible”
+    const ignore = new Set([
+      "instrument_id",
+      "day",
+      "created_at",
+      "updated_at",
+      "fetched_at",
+      "symbol",
+      "name",
+      "id",
+    ]);
 
-  throw lastError;
+    for (const [k, v] of Object.entries(row || {})) {
+      if (ignore.has(k)) continue;
+      const n = Number(v);
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
+    }
+
+    return 0;
+  };
+
+  return (data || []).map((r) => ({
+    instrument_id: r.instrument_id,
+    day: r.day, // "YYYY-MM-DD"
+    price: pickPrice(r),
+  }));
 };
 
 export default function Analyse() {
@@ -492,7 +516,7 @@ export default function Analyse() {
           }
         }
 
-        // ✅ Historique comparateur (NOUVEAU: asset_prices_daily)
+        // ✅ Historique comparateur (asset_prices_daily) — FIX ICI
         try {
           const dailyRows = await fetchAssetPricesDailySafe({
             instrumentIds,
@@ -518,7 +542,7 @@ export default function Analyse() {
           });
         } catch (e) {
           console.error(
-            "Comparateur: impossible de charger asset_prices_daily (colonnes prix inconnues).",
+            "Comparateur: impossible de charger asset_prices_daily.",
             e
           );
           historicalPricesByInstrument = {};
@@ -936,7 +960,12 @@ export default function Analyse() {
     datasets: [
       {
         label: "Profil de risque",
-        data: [volatilityScore, diversificationScore, liquidityScore, horizonScore],
+        data: [
+          volatilityScore,
+          diversificationScore,
+          liquidityScore,
+          horizonScore,
+        ],
         borderColor: "#D4AF37",
         backgroundColor: "rgba(212,175,55,0.16)",
         borderWidth: 2,
@@ -987,7 +1016,9 @@ export default function Analyse() {
     holdings.length > 0
       ? holdings.reduce(
           (best, h) =>
-            best === null || h.monthlyChangePct > best.monthlyChangePct ? h : best,
+            best === null || h.monthlyChangePct > best.monthlyChangePct
+              ? h
+              : best,
           null
         )
       : null;
@@ -1019,7 +1050,10 @@ export default function Analyse() {
 
     basePoints.forEach((point) => {
       const dayDate = point.date;
-      while (j < sortedPriceHistory.length && sortedPriceHistory[j].date <= dayDate) {
+      while (
+        j < sortedPriceHistory.length &&
+        sortedPriceHistory[j].date <= dayDate
+      ) {
         lastPrice = sortedPriceHistory[j].price;
         j++;
       }
@@ -1036,17 +1070,23 @@ export default function Analyse() {
       const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 6);
-      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
     } else if (comparisonMode === "month") {
       const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 29);
-      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
     } else if (comparisonMode === "year") {
       const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
       const start = new Date(last);
       start.setDate(start.getDate() - 364);
-      comparisonPoints = sortedPortfolioHistory.filter((p) => p.date >= start && p.date <= last);
+      comparisonPoints = sortedPortfolioHistory.filter(
+        (p) => p.date >= start && p.date <= last
+      );
     } else if (comparisonMode === "custom") {
       const start = comparisonStartDate ? new Date(comparisonStartDate) : null;
       const end = comparisonEndDate ? new Date(comparisonEndDate) : null;
@@ -1065,8 +1105,12 @@ export default function Analyse() {
 
   const comparisonLabels = comparisonPoints.map((p) => formatDateShort(p.date));
 
-  const selectedObj1 = holdings.find((h) => String(h.id) === String(selectedHolding1));
-  const selectedObj2 = holdings.find((h) => String(h.id) === String(selectedHolding2));
+  const selectedObj1 = holdings.find(
+    (h) => String(h.id) === String(selectedHolding1)
+  );
+  const selectedObj2 = holdings.find(
+    (h) => String(h.id) === String(selectedHolding2)
+  );
 
   const series1Raw = selectedObj1
     ? buildHoldingSeriesForComparison(selectedObj1, comparisonPoints)
@@ -1151,7 +1195,12 @@ export default function Analyse() {
     scales: {
       x: {
         grid: { display: false },
-        ticks: { color: "#9CA3AF", font: { size: 11 }, maxRotation: 0, autoSkipPadding: 10 },
+        ticks: {
+          color: "#9CA3AF",
+          font: { size: 11 },
+          maxRotation: 0,
+          autoSkipPadding: 10,
+        },
       },
       y: {
         grid: { color: "rgba(209,213,219,0.5)", drawBorder: false },
@@ -1196,11 +1245,32 @@ export default function Analyse() {
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <SidebarItem icon={Home} label="Tableau de bord" onClick={() => navigate("/dashboard")} />
-          <SidebarItem icon={Wallet} label="Comptes & placements" onClick={() => navigate("/accounts")} />
-          <SidebarItem icon={BarChart3} label="Analyse" active onClick={() => navigate("/analyse")} />
-          <SidebarItem icon={PieChart} label="Portefeuille" onClick={() => navigate("/portefeuille")} />
-          <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
+          <SidebarItem
+            icon={Home}
+            label="Tableau de bord"
+            onClick={() => navigate("/dashboard")}
+          />
+          <SidebarItem
+            icon={Wallet}
+            label="Comptes & placements"
+            onClick={() => navigate("/accounts")}
+          />
+          <SidebarItem
+            icon={BarChart3}
+            label="Analyse"
+            active
+            onClick={() => navigate("/analyse")}
+          />
+          <SidebarItem
+            icon={PieChart}
+            label="Portefeuille"
+            onClick={() => navigate("/portefeuille")}
+          />
+          <SidebarItem
+            icon={GraduationCap}
+            label="Glossaire"
+            onClick={() => navigate("/glossaire")}
+          />
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">
@@ -1310,7 +1380,8 @@ export default function Analyse() {
                         Évolution de la valeur du portefeuille
                       </h2>
                       <p className="text-xs text-gray-500">
-                        Vue {historyModeLabel.toLowerCase()} de la valeur totale estimée.
+                        Vue {historyModeLabel.toLowerCase()} de la valeur totale
+                        estimée.
                       </p>
                     </div>
 
@@ -1341,7 +1412,10 @@ export default function Analyse() {
                     <div className="absolute inset-x-6 bottom-0 h-24 bg-gradient-to-t from-[#F5E7B3] via-transparent to-transparent opacity-40 pointer-events-none" />
                     <div className="relative h-full">
                       {performanceHistoryData ? (
-                        <Line data={performanceHistoryData} options={performanceHistoryOptions} />
+                        <Line
+                          data={performanceHistoryData}
+                          options={performanceHistoryOptions}
+                        />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-gray-400">
                           Impossible de calculer l’historique pour le moment.
@@ -1357,7 +1431,8 @@ export default function Analyse() {
                       Meilleure & pire ligne (30 jours)
                     </h2>
                     <p className="text-xs text-gray-500">
-                      Basé sur la performance à 30 jours des lignes de votre portefeuille.
+                      Basé sur la performance à 30 jours des lignes de votre
+                      portefeuille.
                     </p>
                   </div>
 
@@ -1370,7 +1445,9 @@ export default function Analyse() {
                         {bestHolding ? bestHolding.name : "—"}
                       </p>
                       <p className="text-xs text-emerald-700 mt-1">
-                        {bestHolding ? `+${Math.round(bestHolding.monthlyChangePct * 10) / 10} %` : "—"}
+                        {bestHolding
+                          ? `+${Math.round(bestHolding.monthlyChangePct * 10) / 10} %`
+                          : "—"}
                       </p>
                     </div>
 
@@ -1382,13 +1459,17 @@ export default function Analyse() {
                         {worstHolding ? worstHolding.name : "—"}
                       </p>
                       <p className="text-xs text-red-600 mt-1">
-                        {worstHolding ? `${Math.round(worstHolding.monthlyChangePct * 10) / 10} %` : "—"}
+                        {worstHolding
+                          ? `${Math.round(worstHolding.monthlyChangePct * 10) / 10} %`
+                          : "—"}
                       </p>
                     </div>
                   </div>
 
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Les performances sont calculées à partir des prix enregistrés dans Olympe et sont fournies à titre exclusivement pédagogique.
+                    Les performances sont calculées à partir des prix enregistrés
+                    dans Olympe et sont fournies à titre exclusivement
+                    pédagogique.
                   </p>
                 </div>
               </section>
@@ -1402,7 +1483,8 @@ export default function Analyse() {
                         Comparer deux placements
                       </h2>
                       <p className="text-xs text-gray-500">
-                        Visualisez l’évolution de la valeur ou de la performance de chaque ligne.
+                        Visualisez l’évolution de la valeur ou de la performance
+                        de chaque ligne.
                       </p>
                     </div>
 
@@ -1425,7 +1507,9 @@ export default function Analyse() {
                       </div>
 
                       <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-gray-500">Ligne 2 (optionnel)</span>
+                        <span className="text-[11px] text-gray-500">
+                          Ligne 2 (optionnel)
+                        </span>
                         <select
                           value={selectedHolding2}
                           onChange={(e) => setSelectedHolding2(e.target.value)}
@@ -1527,7 +1611,8 @@ export default function Analyse() {
                 </div>
 
                 <p className="mt-3 text-[11px] text-gray-400">
-                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre la variation relative depuis le début de la période.
+                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre
+                  la variation relative depuis le début de la période.
                 </p>
               </section>
 
@@ -1542,29 +1627,41 @@ export default function Analyse() {
                       Profil de risque global
                     </h2>
                     <p className="text-xs text-gray-500">
-                      Basé sur la volatilité quotidienne, les plus fortes baisses et la répartition.
+                      Basé sur la volatilité quotidienne, les plus fortes baisses et la
+                      répartition.
                     </p>
 
                     <div className="space-y-2 text-xs text-gray-700">
                       <p>
-                        <span className="font-semibold text-gray-900">Niveau global :</span>{" "}
+                        <span className="font-semibold text-gray-900">
+                          Niveau global :
+                        </span>{" "}
                         {riskProfile.globalLabel}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">Volatilité :</span>{" "}
+                        <span className="font-semibold text-gray-900">
+                          Volatilité :
+                        </span>{" "}
                         {riskProfile.volatilityLabel}{" "}
-                        {dailyReturns.length > 5 && `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
+                        {dailyReturns.length > 5 &&
+                          `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">Pire baisse enregistrée :</span>{" "}
+                        <span className="font-semibold text-gray-900">
+                          Pire baisse enregistrée :
+                        </span>{" "}
                         {maxDrawdownPct} %
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">Diversification :</span>{" "}
+                        <span className="font-semibold text-gray-900">
+                          Diversification :
+                        </span>{" "}
                         {riskProfile.diversificationLabel}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">Liquidités :</span>{" "}
+                        <span className="font-semibold text-gray-900">
+                          Liquidités :
+                        </span>{" "}
                         {cashPct} % du portefeuille
                       </p>
                     </div>
@@ -1596,7 +1693,10 @@ export default function Analyse() {
                       <tbody>
                         {holdingsAnalysisRows.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-3 py-4 text-center text-gray-400 text-[11px]">
+                            <td
+                              colSpan={4}
+                              className="px-3 py-4 text-center text-gray-400 text-[11px]"
+                            >
                               Pas encore assez de données pour analyser vos lignes.
                             </td>
                           </tr>
@@ -1615,7 +1715,9 @@ export default function Analyse() {
                                     {h.name}
                                   </span>
                                   {h.ticker && (
-                                    <span className="text-[10px] text-gray-500">{h.ticker}</span>
+                                    <span className="text-[10px] text-gray-500">
+                                      {h.ticker}
+                                    </span>
                                   )}
                                 </div>
                               </td>
@@ -1672,7 +1774,10 @@ export default function Analyse() {
 
                   <div className="space-y-2">
                     {assetAllocations.map((a) => (
-                      <div key={a.label} className="flex items-center justify-between text-xs">
+                      <div
+                        key={a.label}
+                        className="flex items-center justify-between text-xs"
+                      >
                         <div className="flex items-center gap-2">
                           <span
                             className="h-2 w-2 rounded-full"
@@ -1680,7 +1785,9 @@ export default function Analyse() {
                           />
                           <span className="text-gray-700">{a.label}</span>
                         </div>
-                        <span className="text-gray-900 font-medium">{a.percent} %</span>
+                        <span className="text-gray-900 font-medium">
+                          {a.percent} %
+                        </span>
                       </div>
                     ))}
                     {assetAllocations.length === 0 && (
@@ -1720,11 +1827,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
 function KpiCard({ label, value, subtitle, positive }) {
   const isNumber = typeof value === "string" && value.includes("%");
   const isPositive =
-    positive !== undefined
-      ? positive
-      : isNumber
-      ? !value.startsWith("-")
-      : false;
+    positive !== undefined ? positive : isNumber ? !value.startsWith("-") : false;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col justify-between h-full">
