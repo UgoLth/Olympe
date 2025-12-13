@@ -257,6 +257,44 @@ const buildHistoryDataset = (history, mode) => {
   return null;
 };
 
+/**
+ * ✅ NOUVELLE TABLE POUR LE COMPARATEUR : asset_prices_daily
+ * On tente plusieurs noms de colonnes prix pour éviter que la page casse si ta table n'a pas "close_price".
+ * Résultat normalisé: [{ instrument_id, day, price }]
+ */
+const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
+  const attempts = [
+    { col: "close_price", select: "instrument_id, day, close_price" },
+    { col: "close", select: "instrument_id, day, close" },
+    { col: "adj_close", select: "instrument_id, day, adj_close" },
+    { col: "price", select: "instrument_id, day, price" },
+    { col: "value", select: "instrument_id, day, value" },
+  ];
+
+  let lastError = null;
+
+  for (const a of attempts) {
+    const { data, error } = await supabase
+      .from("asset_prices_daily")
+      .select(a.select)
+      .in("instrument_id", instrumentIds)
+      .gte("day", fromDayKey)
+      .order("day", { ascending: true });
+
+    if (!error) {
+      return (data || []).map((r) => ({
+        instrument_id: r.instrument_id,
+        day: r.day, // "YYYY-MM-DD"
+        price: toNumber(r[a.col]),
+      }));
+    }
+
+    lastError = error;
+  }
+
+  throw lastError;
+};
+
 export default function Analyse() {
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState("");
@@ -280,7 +318,7 @@ export default function Analyse() {
   const [portfolioHistory, setPortfolioHistory] = useState([]); // [{date, value}]
   const [historyMode, setHistoryMode] = useState("day");
 
-  // ⚠️ comparaison: on garde instrumentHistoryMap basé sur asset_prices (si tu veux, on basculera après sur asset_prices_daily)
+  // ✅ comparaison: instrumentHistoryMap basé sur asset_prices_daily (1 point/jour)
   const [instrumentHistoryMap, setInstrumentHistoryMap] = useState({});
 
   const [selectedHolding1, setSelectedHolding1] = useState("");
@@ -375,9 +413,8 @@ export default function Analyse() {
       let prev30dByInstrument = {};
       let prevYtdByInstrument = {};
 
-      // ✅ 1 point/jour (Paris) pour la comparaison
+      // ✅ historique 1 point/jour pour le comparateur (asset_prices_daily)
       let historicalPricesByInstrument = {};
-      let dailyPriceMapByInstrument = {};
 
       if (instrumentIds.length > 0) {
         const now = new Date();
@@ -393,11 +430,11 @@ export default function Analyse() {
         const startOfYearDate = new Date(now.getFullYear(), 0, 2);
         const isoYtdStart = startOfYearDate.toISOString();
 
-        // ✅ Pour la comparaison, on prend ~2 ans (évite “courbe plate” si ton compte est récent ou si isoHistoryStart est trop serré)
+        // ✅ Pour la comparaison, on prend ~2 ans
         const historyStart = new Date(now);
         historyStart.setFullYear(now.getFullYear() - 2);
         historyStart.setHours(0, 0, 0, 0);
-        const isoHistoryStart = historyStart.toISOString();
+        const fromDayKey = getDayKeyInTZ(historyStart, APP_TZ);
 
         const { data: instruments, error: instError } = await supabase
           .from("instruments")
@@ -410,7 +447,7 @@ export default function Analyse() {
           (instruments || []).map((inst) => [inst.id, inst])
         );
 
-        // J-1
+        // J-1 (inchangé)
         const { data: prices1d } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
@@ -425,7 +462,7 @@ export default function Analyse() {
           }
         }
 
-        // 30 jours
+        // 30 jours (inchangé)
         const { data: prices30d } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
@@ -440,7 +477,7 @@ export default function Analyse() {
           }
         }
 
-        // YTD
+        // YTD (inchangé)
         const { data: pricesYtd } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
@@ -455,49 +492,36 @@ export default function Analyse() {
           }
         }
 
-        // Historique complet (pour comparaison)
-        const { data: historyPrices } = await supabase
-          .from("asset_prices")
-          .select("instrument_id, price, fetched_at")
-          .in("instrument_id", instrumentIds)
-          .gte("fetched_at", isoHistoryStart)
-          .order("fetched_at", { ascending: true });
-
-        if (historyPrices && historyPrices.length > 0) {
-          const perInstrumentPerDay = {};
-
-          for (const p of historyPrices) {
-            const id = p.instrument_id;
-            const dayKey = getDayKeyInTZ(p.fetched_at, APP_TZ);
-            const key = `${id}_${dayKey}`;
-
-            // gardera la dernière quote du jour (car tri asc)
-            perInstrumentPerDay[key] = {
-              instrumentId: id,
-              dayKey,
-              date: dateFromDayKey(dayKey),
-              price: toNumber(p.price),
-            };
-          }
+        // ✅ Historique comparateur (NOUVEAU: asset_prices_daily)
+        try {
+          const dailyRows = await fetchAssetPricesDailySafe({
+            instrumentIds,
+            fromDayKey,
+          });
 
           historicalPricesByInstrument = {};
-          Object.values(perInstrumentPerDay).forEach((row) => {
-            const { instrumentId, dayKey, date, price } = row;
-            if (!historicalPricesByInstrument[instrumentId]) {
-              historicalPricesByInstrument[instrumentId] = [];
-            }
-            historicalPricesByInstrument[instrumentId].push({ dayKey, date, price });
-          });
+          for (const r of dailyRows || []) {
+            const id = r.instrument_id;
+            const dayKey = r.day;
+            if (!id || !dayKey) continue;
 
-          dailyPriceMapByInstrument = {};
+            if (!historicalPricesByInstrument[id]) historicalPricesByInstrument[id] = [];
+            historicalPricesByInstrument[id].push({
+              dayKey,
+              date: dateFromDayKey(dayKey),
+              price: toNumber(r.price),
+            });
+          }
+
           Object.keys(historicalPricesByInstrument).forEach((id) => {
             historicalPricesByInstrument[id].sort((a, b) => a.date - b.date);
-            const m = new Map();
-            for (const pt of historicalPricesByInstrument[id]) {
-              m.set(pt.dayKey, pt.price);
-            }
-            dailyPriceMapByInstrument[id] = m;
           });
+        } catch (e) {
+          console.error(
+            "Comparateur: impossible de charger asset_prices_daily (colonnes prix inconnues).",
+            e
+          );
+          historicalPricesByInstrument = {};
         }
       }
 
@@ -571,7 +595,8 @@ export default function Analyse() {
 
       const holdingsWithAllocation = computedHoldings.map((h) => ({
         ...h,
-        allocationPct: totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
+        allocationPct:
+          totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
       // -------- CAMEMBERT PAR CATÉGORIE ----------
@@ -594,7 +619,10 @@ export default function Analyse() {
       const computedAllocations = Object.entries(categoryTotals).map(
         ([label, amount]) => ({
           label,
-          percent: totalValue > 0 ? Math.round((Number(amount) / totalValue) * 100) : 0,
+          percent:
+            totalValue > 0
+              ? Math.round((Number(amount) / totalValue) * 100)
+              : 0,
           color: palette[label] || "#6B7280",
         })
       );
@@ -606,12 +634,14 @@ export default function Analyse() {
       });
 
       holdingsWithAllocation.forEach((h) => {
-        if (accountValueMap[h.accountId] === undefined) accountValueMap[h.accountId] = 0;
+        if (accountValueMap[h.accountId] === undefined)
+          accountValueMap[h.accountId] = 0;
         accountValueMap[h.accountId] += h.value;
       });
 
       standaloneAccounts.forEach((a) => {
-        accountValueMap[a.id] = (accountValueMap[a.id] || 0) + toNumber(a.current_amount);
+        accountValueMap[a.id] =
+          (accountValueMap[a.id] || 0) + toNumber(a.current_amount);
       });
 
       const totalAccountsValue = Object.values(accountValueMap).reduce(
@@ -631,7 +661,9 @@ export default function Analyse() {
         .map(([label, amount]) => ({
           label,
           percent:
-            totalAccountsValue > 0 ? Math.round((amount / totalAccountsValue) * 100) : 0,
+            totalAccountsValue > 0
+              ? Math.round((amount / totalAccountsValue) * 100)
+              : 0,
         }))
         .sort((a, b) => b.percent - a.percent);
 
@@ -655,15 +687,15 @@ export default function Analyse() {
 
       const totalReturnPct =
         totalInvested > 0
-          ? Math.round(((totalValue - totalInvested) / totalInvested) * 1000) / 10
+          ? Math.round(((totalValue - totalInvested) / totalInvested) * 1000) /
+            10
           : 0;
 
       setHoldings(holdingsWithAllocation);
       setAssetAllocations(computedAllocations);
       setAccountTypeAllocations(computedAccountTypeAlloc);
 
-      // ✅ IMPORTANT : history vient de la table portfolio_history_daily
-      // (déjà set plus haut)
+      // ✅ IMPORTANT : instrumentHistoryMap vient maintenant de asset_prices_daily (comparateur)
       setInstrumentHistoryMap(historicalPricesByInstrument);
 
       setSummary({
@@ -731,7 +763,10 @@ export default function Analyse() {
   };
 
   // ---------- COURBE (avec multi-périodes) ----------
-  const performanceHistoryData = buildHistoryDataset(portfolioHistory, historyMode);
+  const performanceHistoryData = buildHistoryDataset(
+    portfolioHistory,
+    historyMode
+  );
 
   const historyModeLabel = {
     day: "Journalier",
@@ -848,7 +883,8 @@ export default function Analyse() {
       ? "Portefeuille moyennement diversifié"
       : "Portefeuille bien diversifié";
 
-  const cashEntry = assetAllocations.find((a) => a.label === "Liquidités") || null;
+  const cashEntry =
+    assetAllocations.find((a) => a.label === "Liquidités") || null;
   const cashPct = cashEntry ? cashEntry.percent : 0;
 
   let liquidityScore = 0;
