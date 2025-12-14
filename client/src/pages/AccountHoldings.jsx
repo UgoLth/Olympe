@@ -11,6 +11,7 @@ import {
   Home,
   ArrowLeft,
   Plus,
+  SlidersHorizontal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -604,7 +605,7 @@ export default function AccountHoldings() {
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        <div className="flex flex-col justify-center px-6 h-16 border-b border-white/5">
+        <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
           </p>
@@ -622,14 +623,28 @@ export default function AccountHoldings() {
           <SidebarItem
             icon={Wallet}
             label="Comptes & placements"
+            active
             onClick={() => navigate("/accounts")}
           />
-          <SidebarItem icon={BarChart3} label="Analyse" />
-          <SidebarItem icon={PieChart} label="Portefeuille" />
+          <SidebarItem
+            icon={BarChart3}
+            label="Analyse"
+            onClick={() => navigate("/analyse")}
+          />
+          <SidebarItem
+            icon={PieChart}
+            label="Portefeuille"
+            onClick={() => navigate("/portefeuille")}
+          />
           <SidebarItem
             icon={GraduationCap}
             label="Glossaire"
             onClick={() => navigate("/glossaire")}
+          />
+          <SidebarItem
+            icon={SlidersHorizontal}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
           />
         </nav>
 
@@ -707,9 +722,7 @@ export default function AccountHoldings() {
               </span>{" "}
               — Type :{" "}
               <span className="font-medium text-gray-800">
-                {account?.type
-                  ? TYPE_LABELS[account.type] || account.type
-                  : "—"}
+                {account?.type ? TYPE_LABELS[account.type] || account.type : "—"}
               </span>
             </p>
             <p className="text-xs text-gray-400 mt-1">
@@ -786,15 +799,11 @@ export default function AccountHoldings() {
                         {h.created_at && (
                           <span className="text-[11px] text-gray-400">
                             Ajouté le{" "}
-                            {new Date(h.created_at).toLocaleDateString(
-                              "fr-FR"
-                            )}
+                            {new Date(h.created_at).toLocaleDateString("fr-FR")}
                           </span>
                         )}
                       </div>
-                      <div className="w-2/12 text-right text-gray-800">
-                        {qty}
-                      </div>
+                      <div className="w-2/12 text-right text-gray-800">{qty}</div>
                       <div className="w-2/12 text-right text-gray-800">
                         {avgPrice.toLocaleString("fr-FR", {
                           minimumFractionDigits: 2,

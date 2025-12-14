@@ -8,18 +8,14 @@ import {
   Settings,
   LogOut,
   Home,
+  SlidersHorizontal,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
 
 // 🎨 Chart.js
 import { Doughnut } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  ArcElement,
-  Tooltip,
-  Legend,
-} from "chart.js";
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -465,6 +461,11 @@ export default function Portfolio() {
             label="Glossaire"
             onClick={() => navigate("/glossaire")}
           />
+          <SidebarItem
+            icon={SlidersHorizontal}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
+          />
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">
@@ -840,9 +841,7 @@ function KpiCard({ label, value, subtitle, positive }) {
           {value}
         </span>
       </p>
-      {subtitle && (
-        <p className="mt-1 text-[11px] text-gray-400">{subtitle}</p>
-      )}
+      {subtitle && <p className="mt-1 text-[11px] text-gray-400">{subtitle}</p>}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   Search,
   Info,
   ChevronDown,
+  SlidersHorizontal,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -109,7 +110,7 @@ const glossaryData = [
     avantages: [
       "Meilleur taux que la plupart des autres livrets sécurisés.",
       "Intérêts non imposés.",
-      "Aucun risque de perte de capital.",
+      "Aucun risque de perte en capital.",
     ],
     inconvenients: [
       "Accessible uniquement sous conditions de revenus.",
@@ -1192,23 +1193,28 @@ export default function Glossary() {
           <SidebarItem
             icon={Wallet}
             label="Comptes & placements"
-            // onClick={() => navigate("/comptes")}
+            onClick={() => navigate("/accounts")}
           />
           <SidebarItem
             icon={BarChart3}
             label="Analyse"
-            // onClick={() => navigate("/analyse")}
+            onClick={() => navigate("/analyse")}
           />
           <SidebarItem
             icon={PieChart}
             label="Portefeuille"
-            // onClick={() => navigate("/portefeuille")}
+            onClick={() => navigate("/portefeuille")}
           />
           <SidebarItem
             icon={GraduationCap}
             label="Glossaire"
             active
             onClick={() => navigate("/glossaire")}
+          />
+          <SidebarItem
+            icon={SlidersHorizontal}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
           />
         </nav>
 
@@ -1368,9 +1374,7 @@ export default function Glossary() {
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#D4AF37]">
                               En bref
                             </p>
-                            <p className="mt-1 text-gray-800">
-                              {item.resume}
-                            </p>
+                            <p className="mt-1 text-gray-800">{item.resume}</p>
                           </div>
 
                           {/* Grid des détails */}

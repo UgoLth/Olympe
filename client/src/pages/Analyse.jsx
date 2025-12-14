@@ -8,6 +8,7 @@ import {
   Settings,
   LogOut,
   Home,
+  Sparkles,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
@@ -261,6 +262,10 @@ const buildHistoryDataset = (history, mode) => {
  * ✅ FIX ICI (et seulement ici)
  * Avant: plusieurs selects sur des colonnes supposées -> 400 si colonne inexistante -> map vide -> aucune courbe
  * Maintenant: 1 seul select("*") puis on déduit la colonne prix côté JS.
+ *
+ * ✅ + FIX DATES RECENTES :
+ * Supabase/PostgREST retourne ~1000 lignes max par défaut => tu récupérais seulement les plus anciennes (juin/juillet)
+ * Maintenant: on prend les plus récentes et on élargit la fenêtre avec range()
  */
 const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
   const { data, error } = await supabase
@@ -268,7 +273,8 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
     .select("*")
     .in("instrument_id", instrumentIds)
     .gte("day", fromDayKey)
-    .order("day", { ascending: true });
+    .order("day", { ascending: false }) // ✅ prendre les plus récentes en premier
+    .range(0, 5000); // ✅ dépasser la limite silencieuse (~1000)
 
   if (error) throw error;
 
@@ -288,7 +294,8 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
     for (const k of candidates) {
       const v = row?.[k];
       const n = Number(v);
-      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n))
+        return n;
     }
 
     // fallback: premier champ numérique “plausible”
@@ -306,17 +313,24 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
     for (const [k, v] of Object.entries(row || {})) {
       if (ignore.has(k)) continue;
       const n = Number(v);
-      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n))
+        return n;
     }
 
     return 0;
   };
 
-  return (data || []).map((r) => ({
-    instrument_id: r.instrument_id,
-    day: r.day, // "YYYY-MM-DD"
-    price: pickPrice(r),
-  }));
+  return (data || []).map((r) => {
+    // ✅ FIX COMPARATEUR : normaliser la colonne day (DATE) => "YYYY-MM-DD"
+    const dayKey =
+      typeof r.day === "string" ? r.day : getDayKeyInTZ(r.day, APP_TZ);
+
+    return {
+      instrument_id: r.instrument_id,
+      day: dayKey, // "YYYY-MM-DD"
+      price: pickPrice(r),
+    };
+  });
 };
 
 export default function Analyse() {
@@ -482,7 +496,8 @@ export default function Analyse() {
         if (prices1d) {
           for (const p of prices1d) {
             const id = p.instrument_id;
-            if (!prev1dByInstrument[id]) prev1dByInstrument[id] = toNumber(p.price);
+            if (!prev1dByInstrument[id])
+              prev1dByInstrument[id] = toNumber(p.price);
           }
         }
 
@@ -497,7 +512,8 @@ export default function Analyse() {
         if (prices30d) {
           for (const p of prices30d) {
             const id = p.instrument_id;
-            if (!prev30dByInstrument[id]) prev30dByInstrument[id] = toNumber(p.price);
+            if (!prev30dByInstrument[id])
+              prev30dByInstrument[id] = toNumber(p.price);
           }
         }
 
@@ -512,11 +528,12 @@ export default function Analyse() {
         if (pricesYtd) {
           for (const p of pricesYtd) {
             const id = p.instrument_id;
-            if (!prevYtdByInstrument[id]) prevYtdByInstrument[id] = toNumber(p.price);
+            if (!prevYtdByInstrument[id])
+              prevYtdByInstrument[id] = toNumber(p.price);
           }
         }
 
-        // ✅ Historique comparateur (asset_prices_daily) — FIX ICI
+        // ✅ Historique comparateur (asset_prices_daily)
         try {
           const dailyRows = await fetchAssetPricesDailySafe({
             instrumentIds,
@@ -526,10 +543,11 @@ export default function Analyse() {
           historicalPricesByInstrument = {};
           for (const r of dailyRows || []) {
             const id = r.instrument_id;
-            const dayKey = r.day;
+            const dayKey = r.day; // ✅ dayKey normalisé "YYYY-MM-DD"
             if (!id || !dayKey) continue;
 
-            if (!historicalPricesByInstrument[id]) historicalPricesByInstrument[id] = [];
+            if (!historicalPricesByInstrument[id])
+              historicalPricesByInstrument[id] = [];
             historicalPricesByInstrument[id].push({
               dayKey,
               date: dateFromDayKey(dayKey),
@@ -889,7 +907,10 @@ export default function Analyse() {
 
   const maxWeightPct =
     holdings.length > 0
-      ? holdings.reduce((m, h) => (h.allocationPct > m ? h.allocationPct : m), 0)
+      ? holdings.reduce(
+          (m, h) => (h.allocationPct > m ? h.allocationPct : m),
+          0
+        )
       : 0;
 
   let diversificationScore = 0;
@@ -1035,6 +1056,10 @@ export default function Analyse() {
       : null;
 
   // ---------- COMPARAISON ----------
+  // ✅ MODIF UNIQUEMENT DU COMPARATEUR :
+  // - timeline (X) basée sur asset_prices_daily.day
+  // - on aligne par "dayKey" (YYYY-MM-DD)
+  // - carry-forward (dernier prix connu <= jour demandé)
   const buildHoldingSeriesForComparison = (holding, basePoints) => {
     if (!holding || !basePoints || !basePoints.length) return null;
     if (!holding.instrumentId) return null;
@@ -1042,68 +1067,69 @@ export default function Analyse() {
     const priceHistory = instrumentHistoryMap[holding.instrumentId];
     if (!priceHistory || !priceHistory.length) return null;
 
-    const sortedPriceHistory = [...priceHistory].sort((a, b) => a.date - b.date);
+    // ✅ FIX COMPARATEUR : on normalise dayKey au cas où
+    const normalized = priceHistory
+      .map((p) => ({
+        ...p,
+        dayKey:
+          typeof p.dayKey === "string"
+            ? p.dayKey
+            : getDayKeyInTZ(p.dayKey, APP_TZ),
+      }))
+      .filter((p) => !!p.dayKey);
+
+    // Tri par dayKey (string) => ordre chrono garanti
+    const sortedByDayKey = [...normalized].sort((a, b) =>
+      String(a.dayKey).localeCompare(String(b.dayKey))
+    );
+
+    const dayKeys = sortedByDayKey.map((p) => String(p.dayKey));
+    const prices = sortedByDayKey.map((p) => toNumber(p.price));
+
+    // binary search: dernier index i tel que dayKeys[i] <= targetKey
+    const lastIndexLE = (targetKey) => {
+      const t = String(targetKey);
+      let lo = 0;
+      let hi = dayKeys.length - 1;
+      let ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (dayKeys[mid] <= t) {
+          ans = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return ans;
+    };
 
     const data = [];
-    let j = 0;
-    let lastPrice = sortedPriceHistory[0].price;
+    for (const point of basePoints) {
+      // ✅ timeline = asset_prices_daily.day
+      const targetDayKey = point.dayKey;
 
-    basePoints.forEach((point) => {
-      const dayDate = point.date;
-      while (
-        j < sortedPriceHistory.length &&
-        sortedPriceHistory[j].date <= dayDate
-      ) {
-        lastPrice = sortedPriceHistory[j].price;
-        j++;
+      const idx = lastIndexLE(targetDayKey);
+
+      // si aucun prix <= ce jour : null (ça évite de tracer du faux)
+      if (idx < 0) {
+        data.push(null);
+        continue;
       }
-      data.push(holding.quantity * lastPrice);
-    });
 
-    return data;
-  };
+      const p = prices[idx];
+      if (!p || p <= 0) {
+        data.push(null);
+        continue;
+      }
 
-  let comparisonPoints = sortedPortfolioHistory;
-
-  if (sortedPortfolioHistory.length > 0) {
-    if (comparisonMode === "week") {
-      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
-      const start = new Date(last);
-      start.setDate(start.getDate() - 6);
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
-    } else if (comparisonMode === "month") {
-      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
-      const start = new Date(last);
-      start.setDate(start.getDate() - 29);
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
-    } else if (comparisonMode === "year") {
-      const last = sortedPortfolioHistory[sortedPortfolioHistory.length - 1].date;
-      const start = new Date(last);
-      start.setDate(start.getDate() - 364);
-      comparisonPoints = sortedPortfolioHistory.filter(
-        (p) => p.date >= start && p.date <= last
-      );
-    } else if (comparisonMode === "custom") {
-      const start = comparisonStartDate ? new Date(comparisonStartDate) : null;
-      const end = comparisonEndDate ? new Date(comparisonEndDate) : null;
-      if (start) start.setHours(0, 0, 0, 0);
-      if (end) end.setHours(23, 59, 59, 999);
-      comparisonPoints = sortedPortfolioHistory.filter((p) => {
-        const d = p.date;
-        if (start && d < start) return false;
-        if (end && d > end) return false;
-        return true;
-      });
-    } else {
-      comparisonPoints = sortedPortfolioHistory;
+      data.push(toNumber(holding.quantity) * p);
     }
-  }
 
-  const comparisonLabels = comparisonPoints.map((p) => formatDateShort(p.date));
+    // si tout est null => pas de série
+    const hasAny = data.some((v) => v !== null && v !== undefined);
+    return hasAny ? data : null;
+  };
 
   const selectedObj1 = holdings.find(
     (h) => String(h.id) === String(selectedHolding1)
@@ -1111,6 +1137,62 @@ export default function Analyse() {
   const selectedObj2 = holdings.find(
     (h) => String(h.id) === String(selectedHolding2)
   );
+
+  // ✅ FIX: timeline basée sur asset_prices_daily.day (pas portfolio_history_daily)
+  const buildComparisonDayKeys = () => {
+    const ids = [selectedObj1?.instrumentId, selectedObj2?.instrumentId].filter(
+      Boolean
+    );
+
+    const set = new Set();
+    ids.forEach((id) => {
+      (instrumentHistoryMap[id] || []).forEach((p) => {
+        const k =
+          typeof p?.dayKey === "string"
+            ? p.dayKey
+            : p?.dayKey
+            ? String(p.dayKey)
+            : null;
+        if (k) set.add(k);
+      });
+    });
+
+    let keys = Array.from(set).sort((a, b) => a.localeCompare(b));
+    if (!keys.length) return [];
+
+    const lastKey = keys[keys.length - 1];
+
+    const subDays = (n) => {
+      const d = new Date(`${lastKey}T12:00:00.000Z`);
+      d.setDate(d.getDate() - (n - 1));
+      const minKey = getDayKeyInTZ(d, APP_TZ);
+      return keys.filter((k) => k >= minKey && k <= lastKey);
+    };
+
+    if (comparisonMode === "week") keys = subDays(7);
+    else if (comparisonMode === "month") keys = subDays(30);
+    else if (comparisonMode === "year") keys = subDays(365);
+    else if (comparisonMode === "custom") {
+      const startKey = comparisonStartDate ? String(comparisonStartDate) : null; // YYYY-MM-DD
+      const endKey = comparisonEndDate ? String(comparisonEndDate) : null;
+      keys = keys.filter((k) => {
+        if (startKey && k < startKey) return false;
+        if (endKey && k > endKey) return false;
+        return true;
+      });
+    }
+
+    return keys;
+  };
+
+  const comparisonDayKeys = buildComparisonDayKeys();
+
+  const comparisonPoints = comparisonDayKeys.map((k) => ({
+    dayKey: k,
+    date: dateFromDayKey(k),
+  }));
+
+  const comparisonLabels = comparisonPoints.map((p) => formatDateShort(p.date));
 
   const series1Raw = selectedObj1
     ? buildHoldingSeriesForComparison(selectedObj1, comparisonPoints)
@@ -1121,15 +1203,27 @@ export default function Analyse() {
 
   const normalizeToPerf = (series) => {
     if (!series || !series.length) return null;
-    const base = series[0];
+
+    // ✅ base = premier point non-null et > 0
+    const base = series.find((v) => v !== null && v !== undefined && v > 0);
     if (!base || base <= 0) return null;
-    return series.map((v) => (v / base - 1) * 100);
+
+    return series.map((v) => {
+      if (v === null || v === undefined || v <= 0) return null;
+      return (v / base - 1) * 100;
+    });
   };
 
   const series1 =
     comparisonValueMode === "value" ? series1Raw : normalizeToPerf(series1Raw);
   const series2 =
     comparisonValueMode === "value" ? series2Raw : normalizeToPerf(series2Raw);
+
+  // ✅ FIX COMPARATEUR : si on a 1 seul point, il faut afficher le point sinon on ne voit rien
+  const pointRadiusFor = (series) => {
+    const n = Array.isArray(series) ? series.filter((v) => v != null).length : 0;
+    return n <= 1 ? 3 : 0;
+  };
 
   const comparisonData =
     (series1 && series1.length) || (series2 && series2.length)
@@ -1145,7 +1239,9 @@ export default function Analyse() {
                     fill: false,
                     borderWidth: 2,
                     borderColor: "#D4AF37",
-                    pointRadius: 0,
+                    pointRadius: pointRadiusFor(series1), // ✅ FIX COMPARATEUR
+                    pointHoverRadius: 4,
+                    spanGaps: true, // ✅ pour éviter des trous si quelques null
                   },
                 ]
               : []),
@@ -1158,7 +1254,9 @@ export default function Analyse() {
                     fill: false,
                     borderWidth: 2,
                     borderColor: "#4B5563",
-                    pointRadius: 0,
+                    pointRadius: pointRadiusFor(series2), // ✅ FIX COMPARATEUR
+                    pointHoverRadius: 4,
+                    spanGaps: true,
                   },
                 ]
               : []),
@@ -1184,10 +1282,11 @@ export default function Analyse() {
         callbacks: {
           label: (ctx) => {
             const v = ctx.parsed.y;
+            if (v === null || v === undefined) return `${ctx.dataset.label}: —`;
             if (comparisonValueMode === "value") {
               return `${ctx.dataset.label}: ${formatCurrency(v)}`;
             }
-            return `${ctx.dataset.label}: ${v.toFixed(1)} %`;
+            return `${ctx.dataset.label}: ${Number(v).toFixed(1)} %`;
           },
         },
       },
@@ -1233,8 +1332,9 @@ export default function Analyse() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      {/* SIDEBAR (même que Dashboard) */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
+        {/* TITRE + EMAIL */}
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
@@ -1244,6 +1344,7 @@ export default function Analyse() {
           </p>
         </div>
 
+        {/* Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
           <SidebarItem
             icon={Home}
@@ -1267,12 +1368,18 @@ export default function Analyse() {
             onClick={() => navigate("/portefeuille")}
           />
           <SidebarItem
+            icon={Sparkles}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
+          />
+          <SidebarItem
             icon={GraduationCap}
             label="Glossaire"
             onClick={() => navigate("/glossaire")}
           />
         </nav>
 
+        {/* Bottom */}
         <div className="mt-auto px-4 pb-4 space-y-2">
           <button
             onClick={() => navigate("/settings")}
@@ -1332,19 +1439,25 @@ export default function Analyse() {
                 {[
                   {
                     label: "Performance totale",
-                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${summary.totalReturnPct} %`,
+                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${
+                      summary.totalReturnPct
+                    } %`,
                     subtitle: "Par rapport aux montants investis",
                     positive: summary.totalReturnPct >= 0,
                   },
                   {
                     label: "Performance YTD",
-                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${summary.ytdReturnPct} %`,
+                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${
+                      summary.ytdReturnPct
+                    } %`,
                     subtitle: "Depuis le 2 janvier",
                     positive: summary.ytdReturnPct >= 0,
                   },
                   {
                     label: "Sur 30 jours",
-                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${summary.monthReturnPct} %`,
+                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${
+                      summary.monthReturnPct
+                    } %`,
                     subtitle: "30 derniers jours",
                     positive: summary.monthReturnPct >= 0,
                   },
@@ -1468,8 +1581,7 @@ export default function Analyse() {
 
                   <p className="text-[11px] text-gray-400 leading-relaxed">
                     Les performances sont calculées à partir des prix enregistrés
-                    dans Olympe et sont fournies à titre exclusivement
-                    pédagogique.
+                    dans Olympe et sont fournies à titre exclusivement pédagogique.
                   </p>
                 </div>
               </section>
@@ -1611,8 +1723,8 @@ export default function Analyse() {
                 </div>
 
                 <p className="mt-3 text-[11px] text-gray-400">
-                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre
-                  la variation relative depuis le début de la période.
+                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre la
+                  variation relative depuis le début de la période.
                 </p>
               </section>
 
@@ -1808,18 +1920,19 @@ export default function Analyse() {
 
 /* ---------- Petits composants UI ---------- */
 
+// ✅ SidebarItem (même style que Dashboard)
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-xl transition ${
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
         active
-          ? "bg-white/10 text-white"
-          : "text-white/70 hover:bg-white/5 hover:text-white"
-      }`}
+          ? "bg-white/5 text-white"
+          : "text-white/60 hover:bg-white/5 hover:text-white"
+      } transition`}
     >
       <Icon size={16} />
-      <span>{label}</span>
+      {label}
     </button>
   );
 }
@@ -1827,7 +1940,11 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
 function KpiCard({ label, value, subtitle, positive }) {
   const isNumber = typeof value === "string" && value.includes("%");
   const isPositive =
-    positive !== undefined ? positive : isNumber ? !value.startsWith("-") : false;
+    positive !== undefined
+      ? positive
+      : isNumber
+      ? !value.startsWith("-")
+      : false;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col justify-between h-full">

@@ -10,6 +10,7 @@ import {
   Settings as SettingsIcon,
   LogOut,
   Home,
+  SlidersHorizontal,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -100,9 +101,7 @@ export default function Settings() {
 
     if (error) {
       console.error("Erreur update email :", error);
-      setMessage(
-        "Erreur lors de la mise à jour de l’email : " + error.message
-      );
+      setMessage("Erreur lors de la mise à jour de l’email : " + error.message);
     } else {
       const updatedEmail = data?.user?.email ?? cleanedEmail;
       setUser((prev) => (prev ? { ...prev, email: updatedEmail } : prev));
@@ -205,7 +204,6 @@ export default function Settings() {
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        {/* TITRE + EMAIL */}
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
@@ -215,24 +213,43 @@ export default function Settings() {
           </p>
         </div>
 
-        {/* Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
           <SidebarItem
             icon={Home}
             label="Tableau de bord"
             onClick={() => navigate("/dashboard")}
           />
-          <SidebarItem icon={Wallet} label="Comptes & placements" />
-          <SidebarItem icon={BarChart3} label="Analyse" />
-          <SidebarItem icon={PieChart} label="Portefeuille" />
-          <SidebarItem icon={GraduationCap} label="Glossaire" />
+          <SidebarItem
+            icon={Wallet}
+            label="Comptes & placements"
+            onClick={() => navigate("/accounts")}
+          />
+          <SidebarItem
+            icon={BarChart3}
+            label="Analyse"
+            onClick={() => navigate("/analyse")}
+          />
+          <SidebarItem
+            icon={PieChart}
+            label="Portefeuille"
+            onClick={() => navigate("/portefeuille")}
+          />
+          <SidebarItem
+            icon={GraduationCap}
+            label="Glossaire"
+            onClick={() => navigate("/glossaire")}
+          />
+          <SidebarItem
+            icon={SlidersHorizontal}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
+          />
         </nav>
 
-        {/* Bottom */}
         <div className="mt-auto px-4 pb-4 space-y-2">
           <button
-            className="w-full flex items-center gap-2 text-sm bg-white/5 text-white rounded-lg px-3 py-2"
-            disabled
+            onClick={() => navigate("/settings")}
+            className="w-full flex items-center gap-2 text-sm text-white/70 hover:text-white transition"
           >
             <SettingsIcon size={16} />
             Paramètres
@@ -331,7 +348,9 @@ export default function Settings() {
 
                 {/* Modifier email */}
                 <div className="border border-gray-100 rounded-xl p-4 flex flex-col gap-3">
-                  <p className="text-sm font-medium">Modifier l’adresse email</p>
+                  <p className="text-sm font-medium">
+                    Modifier l’adresse email
+                  </p>
                   <form
                     onSubmit={handleUpdateEmail}
                     className="flex flex-col md:flex-row gap-3"
@@ -407,12 +426,16 @@ export default function Settings() {
   );
 }
 
-// Composants internes
-function SidebarItem({ icon: Icon, label, onClick }) {
+// ✅ SidebarItem (même style que Dashboard)
+function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/60 hover:bg-white/5 hover:text-white transition"
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
+        active
+          ? "bg-white/5 text-white"
+          : "text-white/60 hover:bg-white/5 hover:text-white"
+      } transition`}
     >
       <Icon size={16} />
       {label}

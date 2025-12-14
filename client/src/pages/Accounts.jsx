@@ -12,6 +12,7 @@ import {
   Plus,
   Edit3,
   Trash2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -215,9 +216,7 @@ export default function Accounts() {
   };
 
   const availableProducts =
-    form.type && PRODUCTS_BY_TYPE[form.type]
-      ? PRODUCTS_BY_TYPE[form.type]
-      : [];
+    form.type && PRODUCTS_BY_TYPE[form.type] ? PRODUCTS_BY_TYPE[form.type] : [];
 
   const totalValue = "— €";
 
@@ -225,7 +224,7 @@ export default function Accounts() {
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
       {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        <div className="px-6 h-16 border-b border-white/5 flex flex-col justify-center">
+        <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
           </p>
@@ -244,27 +243,42 @@ export default function Accounts() {
             active
             onClick={() => navigate("/accounts")}
           />
-          <SidebarItem icon={BarChart3} label="Analyse" />
-          <SidebarItem icon={PieChart} label="Portefeuille" />
+          <SidebarItem
+            icon={BarChart3}
+            label="Analyse"
+            onClick={() => navigate("/analyse")}
+          />
+          <SidebarItem
+            icon={PieChart}
+            label="Portefeuille"
+            onClick={() => navigate("/portefeuille")}
+          />
           <SidebarItem
             icon={GraduationCap}
             label="Glossaire"
             onClick={() => navigate("/glossaire")}
           />
+          <SidebarItem
+            icon={SlidersHorizontal}
+            label="Simulation"
+            onClick={() => navigate("/simulation")}
+          />
         </nav>
 
-        <div className="px-4 pb-4">
+        <div className="mt-auto px-4 pb-4 space-y-2">
           <button
             onClick={() => navigate("/settings")}
-            className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2 mb-2"
+            className="w-full flex items-center gap-2 text-sm text-white/70 hover:text-white transition"
           >
-            <Settings size={16} /> Paramètres
+            <Settings size={16} />
+            Paramètres
           </button>
           <button
             onClick={handleLogout}
-            className="w-full text-sm text-white/70 hover:text-white flex items-center gap-2"
+            className="w-full flex items-center gap-2 text-sm text-white/70 hover:text-white transition"
           >
-            <LogOut size={16} /> Déconnexion
+            <LogOut size={16} />
+            Déconnexion
           </button>
           <p className="text-[10px] text-white/25 mt-2">v0.1 – Olympe</p>
         </div>
@@ -284,9 +298,7 @@ export default function Accounts() {
           </p>
           <p className="text-sm">
             Valeur totale :{" "}
-            <span className="font-semibold text-[#D4AF37]">
-              {totalValue}
-            </span>
+            <span className="font-semibold text-[#D4AF37]">{totalValue}</span>
           </p>
         </header>
 
@@ -321,9 +333,7 @@ export default function Accounts() {
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <p className="font-medium text-gray-800 text-sm">Vos comptes</p>
-              <p className="text-xs text-gray-500">
-                {accounts.length} compte(s)
-              </p>
+              <p className="text-xs text-gray-500">{accounts.length} compte(s)</p>
             </div>
 
             {loadingAccounts ? (
@@ -335,10 +345,8 @@ export default function Accounts() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {accounts.map((account, index) => {
-                  const type =
-                    account.type || inferTypeFromProduct(account.product);
-                  const isInvestmentAccount =
-                    type === "investment" || type === "retirement";
+                  const type = account.type || inferTypeFromProduct(account.product);
+                  const isInvestmentAccount = type === "investment" || type === "retirement";
 
                   return (
                     <motion.div
@@ -349,9 +357,7 @@ export default function Accounts() {
                       className="px-4 py-3 flex items-center justify-between hover:bg-gray-50"
                     >
                       <div>
-                        <p className="text-sm font-semibold">
-                          {account.name}
-                        </p>
+                        <p className="text-sm font-semibold">{account.name}</p>
 
                         <div className="mt-1 flex items-center gap-2 flex-wrap">
                           {account.product && (
@@ -370,21 +376,15 @@ export default function Accounts() {
                         <p className="text-xs text-gray-500 mt-1">
                           Solde initial :{" "}
                           <strong>
-                            {Number(account.initial_amount || 0).toLocaleString(
-                              "fr-FR",
-                              {
-                                minimumFractionDigits: 2,
-                              }
-                            )}{" "}
+                            {Number(account.initial_amount || 0).toLocaleString("fr-FR", {
+                              minimumFractionDigits: 2,
+                            })}{" "}
                             {account.currency}
                           </strong>
                           {account.created_at && (
                             <>
                               {" "}
-                              • Créé le{" "}
-                              {new Date(
-                                account.created_at
-                              ).toLocaleDateString("fr-FR")}
+                              • Créé le {new Date(account.created_at).toLocaleDateString("fr-FR")}
                             </>
                           )}
                         </p>
@@ -451,9 +451,7 @@ export default function Accounts() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h2 className="text-base font-semibold">
-                      {editingAccount
-                        ? "Modifier le compte"
-                        : "Nouveau compte"}
+                      {editingAccount ? "Modifier le compte" : "Nouveau compte"}
                     </h2>
                     <p className="text-xs text-gray-500 mt-1">
                       Renseigne les informations du compte.
@@ -473,9 +471,7 @@ export default function Accounts() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {/* NOM */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">
-                      Nom du compte
-                    </label>
+                    <label className="text-xs font-medium text-gray-700">Nom du compte</label>
                     <input
                       type="text"
                       name="name"
@@ -489,9 +485,7 @@ export default function Accounts() {
 
                   {/* TYPE */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">
-                      Type
-                    </label>
+                    <label className="text-xs font-medium text-gray-700">Type</label>
                     <select
                       name="type"
                       value={form.type}
@@ -510,9 +504,7 @@ export default function Accounts() {
 
                   {/* PRODUIT */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700">
-                      Produit / compte précis
-                    </label>
+                    <label className="text-xs font-medium text-gray-700">Produit / compte précis</label>
                     <select
                       name="product"
                       value={form.product}
@@ -520,29 +512,24 @@ export default function Accounts() {
                       disabled={!form.type}
                       className="w-full border rounded-md px-3 py-2 mt-1 text-sm disabled:bg-gray-100"
                     >
-                      {!form.type && (
-                        <option>Choisir un type d’abord...</option>
-                      )}
-                      {form.type &&
-                        [
-                          <option key={"_"} value="">
-                            Sélectionner...
-                          </option>,
-                          ...availableProducts.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          )),
-                        ]}
+                      {!form.type && <option>Choisir un type d’abord...</option>}
+                      {form.type && [
+                        <option key={"_"} value="">
+                          Sélectionner...
+                        </option>,
+                        ...availableProducts.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        )),
+                      ]}
                     </select>
                   </div>
 
                   {/* SOLDE + DEVISE */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs font-medium text-gray-700">
-                        Solde initial
-                      </label>
+                      <label className="text-xs font-medium text-gray-700">Solde initial</label>
                       <input
                         type="number"
                         step="0.01"
@@ -554,9 +541,7 @@ export default function Accounts() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-medium text-gray-700">
-                        Devise
-                      </label>
+                      <label className="text-xs font-medium text-gray-700">Devise</label>
                       <select
                         name="currency"
                         value={form.currency}
@@ -591,11 +576,7 @@ export default function Accounts() {
                       disabled={saving}
                       className="px-4 py-2 bg-[#D4AF37] text-[#0F1013] rounded-md text-xs font-semibold"
                     >
-                      {saving
-                        ? "Enregistrement..."
-                        : editingAccount
-                        ? "Mettre à jour"
-                        : "Créer le compte"}
+                      {saving ? "Enregistrement..." : editingAccount ? "Mettre à jour" : "Créer le compte"}
                     </motion.button>
                   </div>
                 </form>
@@ -614,10 +595,8 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
-        active
-          ? "bg:white/5 text-white"
-          : "text-white/60 hover:bg-white/5 hover:text-white"
-      }`}
+        active ? "bg-white/5 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
+      } transition`}
     >
       <Icon size={16} />
       {label}
