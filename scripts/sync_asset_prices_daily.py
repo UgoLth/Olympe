@@ -14,20 +14,13 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TZ_PARIS = pytz.timezone("Europe/Paris")
 
-# combien d'années "récentes" on veut garder dans le daily
 LOOKBACK_YEARS = 2
 
-# pagination / batch
 PAGE_SIZE = 1000
 UPSERT_BATCH = 500
 
 
 def to_paris_day(ts: str) -> dt.date:
-    """
-    Convertit un timestamp (ISO) en date Europe/Paris.
-    fetched_at peut arriver avec Z ou +00:00.
-    """
-    # Exemple: "2025-12-13T14:08:26.178524+00:00" ou "....Z"
     utc_dt = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
     paris_dt = utc_dt.astimezone(TZ_PARIS)
     return paris_dt.date()
@@ -42,26 +35,33 @@ def main():
     print("📥 Build asset_prices_daily depuis asset_prices (dernier prix/jour, récent)")
 
     now_utc = dt.datetime.now(dt.timezone.utc)
-    start_utc = now_utc - dt.timedelta(days=365 * LOOKBACK_YEARS + 10)  # marge
+    start_utc = now_utc - dt.timedelta(days=365 * LOOKBACK_YEARS + 10)
     start_iso = start_utc.isoformat()
 
     print(f"🕒 Fenêtre: depuis {start_iso} (UTC) ~ {LOOKBACK_YEARS} an(s)")
 
-    # Map: (instrument_id, day) -> price
-    # On parcourt en DESC, donc la 1ère valeur vue = dernier prix de la journée.
-    daily_map = {}
-
-    offset = 0
+    seen = set()  # (instrument_id, day)
+    batch_payload = []
     total_rows = 0
+    total_daily_points = 0
+
+    # Pagination keyset: on récupère les pages avant le dernier fetched_at lu
+    cursor_fetched_at = None
+
+    now_str = dt.datetime.utcnow().isoformat()
 
     while True:
         q = (
             supabase.table("asset_prices")
-            .select("instrument_id, price, fetched_at")
+            .select("instrument_id, price, fetched_at")  # si tu as "id", ajoute-le ici
             .gte("fetched_at", start_iso)
             .order("fetched_at", desc=True)
-            .range(offset, offset + PAGE_SIZE - 1)
+            .limit(PAGE_SIZE)
         )
+
+        # Keyset pagination (au lieu d'OFFSET)
+        if cursor_fetched_at is not None:
+            q = q.lt("fetched_at", cursor_fetched_at)
 
         resp = q.execute()
         rows = resp.data or []
@@ -69,6 +69,9 @@ def main():
             break
 
         total_rows += len(rows)
+
+        # curseur = fetched_at du dernier élément de la page (le plus ancien de la page)
+        cursor_fetched_at = rows[-1].get("fetched_at")
 
         for r in rows:
             instrument_id = r.get("instrument_id")
@@ -80,47 +83,59 @@ def main():
 
             try:
                 day = to_paris_day(fetched_at)
-                key = (instrument_id, day)
-
-                # IMPORTANT: comme on est en DESC, le 1er rencontré = dernier prix du jour
-                if key not in daily_map:
-                    daily_map[key] = float(price)
             except Exception:
                 continue
 
-        offset += PAGE_SIZE
-        print(f"… page ok (offset={offset}) | rows lus={total_rows} | jours uniques={len(daily_map)}")
+            key = (instrument_id, day)
 
-    if not daily_map:
-        print("⚠️ Aucun prix récent trouvé dans asset_prices.")
-        return
+            # comme on lit en DESC, le 1er vu par (instrument, day) = dernier prix du jour
+            if key in seen:
+                continue
 
-    print(f"📊 {len(daily_map)} points journaliers (instrument_id + day) calculés.")
+            seen.add(key)
+            total_daily_points += 1
 
-    # Upsert payload
-    now_str = dt.datetime.utcnow().isoformat()
+            batch_payload.append(
+                {
+                    "instrument_id": instrument_id,
+                    "day": day.isoformat(),
+                    "price": float(price),
+                    "source": "asset_prices",
+                    "updated_at": now_str,
+                }
+            )
 
-    payload = []
-    for (instrument_id, day), price in daily_map.items():
-        payload.append(
-            {
-                "instrument_id": instrument_id,
-                "day": day.isoformat(),   # DATE "YYYY-MM-DD"
-                "price": price,
-                "source": "asset_prices",
-                "updated_at": now_str,
-            }
+            # flush batch
+            if len(batch_payload) >= UPSERT_BATCH:
+                supabase.table("asset_prices_daily").upsert(
+                    batch_payload,
+                    on_conflict="instrument_id,day"
+                ).execute()
+                batch_payload.clear()
+
+        print(
+            f"… page ok | rows lus={total_rows} | daily points={total_daily_points} | curseur={cursor_fetched_at}"
         )
 
-    # Upsert en batch
-    print("🚀 Upsert dans asset_prices_daily…")
-    for batch in chunks(payload, UPSERT_BATCH):
+    # flush final
+    if batch_payload:
         supabase.table("asset_prices_daily").upsert(
-            batch,
+            batch_payload,
             on_conflict="instrument_id,day"
         ).execute()
 
-    print("✅ asset_prices_daily mise à jour (dernier prix par jour, récent).")
+    if total_daily_points == 0:
+        print("⚠️ Aucun prix récent trouvé dans asset_prices.")
+        return
+
+    print(f"✅ asset_prices_daily mise à jour. points={total_daily_points}")
+
+    # Optionnel : purge des jours hors fenêtre (pour garder une table propre)
+    cutoff_day = (now_utc.astimezone(TZ_PARIS).date() - dt.timedelta(days=365 * LOOKBACK_YEARS + 10)).isoformat()
+    print(f"🧹 Purge optionnelle des days < {cutoff_day}")
+    supabase.table("asset_prices_daily").delete().lt("day", cutoff_day).execute()
+
+    print("✅ Purge terminée (si autorisée par RLS/policies).")
 
 
 if __name__ == "__main__":
