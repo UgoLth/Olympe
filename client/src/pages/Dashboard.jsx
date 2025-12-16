@@ -70,6 +70,56 @@ export default function Dashboard() {
     monthChangePct: 0,
   });
 
+  // -------------------- IA (ai-chat) --------------------
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiText, setAiText] = useState("");
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  const handleAskAi = async () => {
+    try {
+      const q = (aiQuestion || "").trim();
+      if (!q) return;
+
+      setLoadingAi(true);
+      setAiError("");
+      setAiText("");
+
+      const payload = {
+        question: q,
+        context: {
+          app: { name: "Olympe", version: "0.1" },
+          asOf: new Date().toISOString(),
+          dashboard: {
+            summary,
+            accountsPreview,
+            goals,
+            movements,
+          },
+          // bonus: on inclut les holdings + accounts bruts (utile au modèle)
+          holdings,
+          accounts,
+        },
+      };
+
+      const { data, error } = await supabase.functions.invoke("ai-chat", {
+        body: payload,
+      });
+
+      if (error) throw error;
+
+      const text = data?.text || "";
+      setAiText(text);
+    } catch (e) {
+      console.error("AI chat error:", e);
+      setAiError("Impossible de répondre pour le moment.");
+      setAiText("");
+    } finally {
+      setLoadingAi(false);
+    }
+  };
+  // -----------------------------------------------------
+
   // ---- AUTH ----
   useEffect(() => {
     const init = async () => {
@@ -546,6 +596,65 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </div>
+
+                  {/* -------------------- IA (ai-chat) -------------------- */}
+                  <div className="mt-4 border-t border-gray-100 pt-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-800">Assistant IA</h3>
+                        <p className="text-xs text-gray-500">
+                          Pose une question (définition, explication, indicateur…). Aucun conseil financier.
+                        </p>
+                      </div>
+
+                      <motion.button
+                        whileHover={{ scale: 1.03, y: -1 }}
+                        whileTap={{ scale: 0.97, y: 0 }}
+                        onClick={handleAskAi}
+                        disabled={loadingAi || !aiQuestion.trim()}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-[#0F1013] text-white text-xs font-semibold hover:bg-black disabled:opacity-60"
+                      >
+                        {loadingAi ? "Envoi…" : "Envoyer"}
+                      </motion.button>
+                    </div>
+
+                    <div className="mt-3">
+                      <input
+                        value={aiQuestion}
+                        onChange={(e) => setAiQuestion(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleAskAi();
+                        }}
+                        placeholder='Ex: "C’est quoi le drawdown ?"'
+                        className="w-full text-sm bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/30"
+                      />
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        Astuce : tu peux demander “définition de …”, “explique …”, “à quoi sert …”.
+                      </p>
+                    </div>
+
+                    {aiError && (
+                      <div className="mt-3 text-xs bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg">
+                        {aiError}
+                      </div>
+                    )}
+
+                    {loadingAi ? (
+                      <div className="mt-3 text-xs text-gray-500">
+                        <div className="inline-block h-3 w-3 rounded-full border-2 border-gray-200 border-t-[#D4AF37] animate-spin mr-2" />
+                        Réponse en cours…
+                      </div>
+                    ) : aiText ? (
+                      <div className="mt-3 text-xs whitespace-pre-wrap text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+                        {aiText}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-[11px] text-gray-400">
+                        Écris une question puis clique sur “Envoyer”.
+                      </p>
+                    )}
+                  </div>
+                  {/* --------------------------------------------------- */}
                 </div>
 
                 {/* Accounts preview */}
