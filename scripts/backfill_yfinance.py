@@ -157,10 +157,20 @@ def backfill_symbol(symbol: str):
             continue
 
         price = None
+
         if "Adj Close" in row and row["Adj Close"] is not None:
-            price = float(row["Adj Close"])
+            val = row["Adj Close"]
+            # ✅ Correction: si val est une Series, on prend la première valeur
+            if hasattr(val, "iloc"):
+                val = val.iloc[0]
+            price = float(val)
+
         elif "Close" in row and row["Close"] is not None:
-            price = float(row["Close"])
+            val = row["Close"]
+            # ✅ Correction: si val est une Series, on prend la première valeur
+            if hasattr(val, "iloc"):
+                val = val.iloc[0]
+            price = float(val)
 
         if price is None or price <= 0:
             continue
@@ -193,7 +203,7 @@ def backfill_symbol(symbol: str):
 
         if getattr(res, "error", None):
             print("    Erreur d'insertion Supabase:", res.error)
-            raise RuntimeError(res.error)
+            raise RuntimeError(resp.error)
 
         inserted_total += len(chunk)
 
