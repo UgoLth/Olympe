@@ -1,3 +1,4 @@
+// src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -14,6 +15,7 @@ import {
   Target,
   TrendingUp,
   ListChecks,
+  Bot, // ✅ nouveau: icône pour la page IA dans le menu
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
@@ -69,56 +71,6 @@ export default function Dashboard() {
     dailyChangePct: 0,
     monthChangePct: 0,
   });
-
-  // -------------------- IA (ai-chat) --------------------
-  const [aiQuestion, setAiQuestion] = useState("");
-  const [aiText, setAiText] = useState("");
-  const [loadingAi, setLoadingAi] = useState(false);
-  const [aiError, setAiError] = useState("");
-
-  const handleAskAi = async () => {
-    try {
-      const q = (aiQuestion || "").trim();
-      if (!q) return;
-
-      setLoadingAi(true);
-      setAiError("");
-      setAiText("");
-
-      const payload = {
-        question: q,
-        context: {
-          app: { name: "Olympe", version: "0.1" },
-          asOf: new Date().toISOString(),
-          dashboard: {
-            summary,
-            accountsPreview,
-            goals,
-            movements,
-          },
-          // bonus: on inclut les holdings + accounts bruts (utile au modèle)
-          holdings,
-          accounts,
-        },
-      };
-
-      const { data, error } = await supabase.functions.invoke("ai-chat", {
-        body: payload,
-      });
-
-      if (error) throw error;
-
-      const text = data?.text || "";
-      setAiText(text);
-    } catch (e) {
-      console.error("AI chat error:", e);
-      setAiError("Impossible de répondre pour le moment.");
-      setAiText("");
-    } finally {
-      setLoadingAi(false);
-    }
-  };
-  // -----------------------------------------------------
 
   // ---- AUTH ----
   useEffect(() => {
@@ -233,7 +185,6 @@ export default function Dashboard() {
         .from("movements")
         .select("id, user_id, account_id, holding_id, type, amount, description, occurred_at, created_at")
         .eq("user_id", uid)
-        // si occurred_at est parfois NULL, on garde un tri cohérent en re-triant côté JS juste après
         .order("occurred_at", { ascending: false, nullsFirst: false })
         .limit(6);
 
@@ -242,7 +193,6 @@ export default function Dashboard() {
       if (movErr || movData.length === 0) {
         movData = buildFallbackMovements(accountsData || [], holdingsData || []);
       } else {
-        // petit tri défensif côté JS (si occurred_at NULL ou incohérences)
         movData = [...movData].sort((a, b) => {
           const da = new Date(a.occurred_at || a.created_at || 0).getTime();
           const db = new Date(b.occurred_at || b.created_at || 0).getTime();
@@ -326,7 +276,6 @@ export default function Dashboard() {
       let month = 0;
 
       if (totalValue > 0) {
-        // perf pondérée sur holdings uniquement
         holdingsComputed.forEach((h) => {
           const v = toNumber(h._computedValue);
           if (v <= 0) return;
@@ -367,7 +316,6 @@ export default function Dashboard() {
       const goalsComputed = (goalsData || []).map((g) => {
         let current = 0;
 
-        // priorité : holding -> account -> global
         if (g.holding_id && holdingById[g.holding_id]) {
           current = toNumber(holdingById[g.holding_id]._computedValue);
         } else if (g.account_id && accountValueMap[g.account_id] !== undefined) {
@@ -408,7 +356,6 @@ export default function Dashboard() {
   // ---- Derived UI ----
   const accountsPreview = useMemo(() => {
     if (!accounts.length) return [];
-    // valeur du compte = holdings + standalone (même logique que plus haut, recalcul rapide)
     const holdingsByAccount = {};
     holdings.forEach((h) => {
       holdingsByAccount[h.account_id] = (holdingsByAccount[h.account_id] || 0) + toNumber(h._computedValue);
@@ -481,6 +428,7 @@ export default function Dashboard() {
           <SidebarItem icon={PieChart} label="Portefeuille" onClick={() => navigate("/portefeuille")} />
           <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
           <SidebarItem icon={SlidersHorizontal} label="Simulation" onClick={() => navigate("/simulation")} />
+          <SidebarItem icon={Bot} label="Assistant IA" onClick={() => navigate("/assistant")} />
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">
@@ -516,8 +464,7 @@ export default function Dashboard() {
           </p>
 
           <p className="text-sm text-gray-700">
-            Valeur totale :{" "}
-            <span className="font-semibold text-[#D4AF37]">{formatCurrency0(summary.totalValue)}</span>
+            Valeur totale : <span className="font-semibold text-[#D4AF37]">{formatCurrency0(summary.totalValue)}</span>
           </p>
         </header>
 
@@ -536,7 +483,7 @@ export default function Dashboard() {
             <>
               {/* ROW 1 — Compact + Accounts */}
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Compact summary (plus de gros vide) */}
+                {/* Compact summary */}
                 <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -564,10 +511,7 @@ export default function Dashboard() {
                         value: formatPct1(summary.monthChangePct),
                         positive: summary.monthChangePct >= 0,
                       },
-                      {
-                        label: "Valeur totale",
-                        value: formatCurrency0(summary.totalValue),
-                      },
+                      { label: "Valeur totale", value: formatCurrency0(summary.totalValue) },
                     ].map((k, i) => (
                       <motion.div key={k.label} custom={i} variants={kpiVariants} initial="hidden" animate="show">
                         <KpiCard label={k.label} value={k.value} positive={k.positive} />
@@ -575,7 +519,7 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  {/* A retenir (collé au résumé => plus d'espace perdu) */}
+                  {/* A retenir */}
                   <div className="mt-4 border-t border-gray-100 pt-4">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp size={16} className="text-gray-700" />
@@ -597,64 +541,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* -------------------- IA (ai-chat) -------------------- */}
-                  <div className="mt-4 border-t border-gray-100 pt-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-800">Assistant IA</h3>
-                        <p className="text-xs text-gray-500">
-                          Pose une question (définition, explication, indicateur…). Aucun conseil financier.
-                        </p>
-                      </div>
-
-                      <motion.button
-                        whileHover={{ scale: 1.03, y: -1 }}
-                        whileTap={{ scale: 0.97, y: 0 }}
-                        onClick={handleAskAi}
-                        disabled={loadingAi || !aiQuestion.trim()}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-[#0F1013] text-white text-xs font-semibold hover:bg-black disabled:opacity-60"
-                      >
-                        {loadingAi ? "Envoi…" : "Envoyer"}
-                      </motion.button>
-                    </div>
-
-                    <div className="mt-3">
-                      <input
-                        value={aiQuestion}
-                        onChange={(e) => setAiQuestion(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleAskAi();
-                        }}
-                        placeholder='Ex: "C’est quoi le drawdown ?"'
-                        className="w-full text-sm bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/30"
-                      />
-                      <p className="mt-1 text-[11px] text-gray-400">
-                        Astuce : tu peux demander “définition de …”, “explique …”, “à quoi sert …”.
-                      </p>
-                    </div>
-
-                    {aiError && (
-                      <div className="mt-3 text-xs bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg">
-                        {aiError}
-                      </div>
-                    )}
-
-                    {loadingAi ? (
-                      <div className="mt-3 text-xs text-gray-500">
-                        <div className="inline-block h-3 w-3 rounded-full border-2 border-gray-200 border-t-[#D4AF37] animate-spin mr-2" />
-                        Réponse en cours…
-                      </div>
-                    ) : aiText ? (
-                      <div className="mt-3 text-xs whitespace-pre-wrap text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
-                        {aiText}
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-[11px] text-gray-400">
-                        Écris une question puis clique sur “Envoyer”.
-                      </p>
-                    )}
-                  </div>
-                  {/* --------------------------------------------------- */}
+                  {/* ✅ Assistant IA supprimé */}
                 </div>
 
                 {/* Accounts preview */}
@@ -685,7 +572,7 @@ export default function Dashboard() {
 
               {/* ROW 2 — Goals + Movements */}
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Goals (avec infos utiles) */}
+                {/* Goals */}
                 <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div>
@@ -732,7 +619,6 @@ export default function Dashboard() {
                                   {g.allocation_mode ? ` • mode: ${g.allocation_mode}` : ""}
                                 </p>
 
-                                {/* Infos utiles */}
                                 <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-gray-600">
                                   <InfoPill label="Actuel" value={formatCurrency0(current)} />
                                   <InfoPill label="Cible" value={target > 0 ? formatCurrency0(target) : "—"} />

@@ -11,6 +11,7 @@ import {
   LogOut,
   Home,
   SlidersHorizontal,
+  Bot,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -244,6 +245,8 @@ export default function Settings() {
             label="Simulation"
             onClick={() => navigate("/simulation")}
           />
+          <SidebarItem icon={Bot} label="Assistant IA" onClick={() => navigate("/assistant")} />
+
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">

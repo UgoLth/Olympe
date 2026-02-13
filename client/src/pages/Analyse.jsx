@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useState, useMemo } from "react";
+﻿// src/pages/Analyse.jsx
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -8,7 +9,8 @@ import {
   Settings,
   LogOut,
   Home,
-  Sparkles,
+  SlidersHorizontal,
+  Bot,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
@@ -40,8 +42,7 @@ ChartJS.register(
   Filler
 );
 
-const toNumber = (v) =>
-  v === null || v === undefined || v === "" ? 0 : Number(v);
+const toNumber = (v) => (v === null || v === undefined || v === "" ? 0 : Number(v));
 
 // ✅ timezone unique pour les "jours"
 const APP_TZ = "Europe/Paris";
@@ -83,33 +84,16 @@ const categorizePosition = (accountType, assetClass) => {
   if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
     return "Liquidités";
   }
-  if (
-    t.includes("epargne") ||
-    t.includes("épargne") ||
-    t.includes("livret") ||
-    t.includes("savings")
-  ) {
+  if (t.includes("epargne") || t.includes("épargne") || t.includes("livret") || t.includes("savings")) {
     return "Épargne";
   }
-  if (
-    t.includes("invest") ||
-    t.includes("bourse") ||
-    t.includes("ct") ||
-    t.includes("pea") ||
-    t.includes("broker")
-  ) {
+  if (t.includes("invest") || t.includes("bourse") || t.includes("ct") || t.includes("pea") || t.includes("broker")) {
     return "Investissements";
   }
 
   if (a.includes("crypto")) return "Crypto";
   if (a.includes("cash")) return "Liquidités";
-  if (
-    a.includes("equity") ||
-    a.includes("stock") ||
-    a.includes("etf") ||
-    a.includes("fund")
-  )
-    return "Investissements";
+  if (a.includes("equity") || a.includes("stock") || a.includes("etf") || a.includes("fund")) return "Investissements";
 
   return "Autres";
 };
@@ -131,128 +115,87 @@ const formatDateShort = (d) => {
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 };
 
+// ✅ Normalise une série en % (base = 1er point > 0 de la série affichée)
+const normalizeSeriesToPerfPct = (values) => {
+  if (!Array.isArray(values) || values.length === 0) return values;
+  const base = values.find((v) => v !== null && v !== undefined && toNumber(v) > 0);
+  const b = toNumber(base);
+  if (!b || b <= 0) return values.map(() => null);
+  return values.map((v) => {
+    const n = toNumber(v);
+    if (!n || n <= 0) return null;
+    return (n / b - 1) * 100;
+  });
+};
+
 // Construit la série à afficher selon le mode choisi
 // history = [{date: Date, value: number}]
-const buildHistoryDataset = (history, mode) => {
+const buildHistoryDataset = (history, mode, valueMode = "value") => {
   if (!history || history.length === 0) return null;
 
   const sorted = [...history].sort((a, b) => a.date - b.date);
 
-  if (mode === "day") {
-    const last = sorted.slice(-60);
+  const makeDataset = (points, labels) => {
+    const rawValues = points.map((p) => p.value);
+    const dataValues = valueMode === "perf" ? normalizeSeriesToPerfPct(rawValues) : rawValues;
+
     return {
-      labels: last.map((p, i) => {
-        if (i === last.length - 1) return "Aujourd’hui";
-        if (i === last.length - 2) return "Hier";
-        return formatDateShort(p.date);
-      }),
+      labels,
       datasets: [
         {
-          label: "Valeur du portefeuille (€)",
-          data: last.map((p) => p.value),
+          label: valueMode === "perf" ? "Performance du portefeuille (%)" : "Valeur du portefeuille (€)",
+          data: dataValues,
           tension: 0.35,
           fill: true,
           borderWidth: 2,
           borderColor: "#D4AF37",
           backgroundColor: "rgba(212,175,55,0.10)",
-          pointRadius: 3,
-          pointHoverRadius: 5,
+          pointRadius: mode === "all" ? 2 : 3,
+          pointHoverRadius: mode === "all" ? 3 : 5,
           pointBackgroundColor: "#D4AF37",
         },
       ],
     };
+  };
+
+  if (mode === "day") {
+    const last = sorted.slice(-60);
+    const labels = last.map((p, i) => {
+      if (i === last.length - 1) return "Aujourd’hui";
+      if (i === last.length - 2) return "Hier";
+      return formatDateShort(p.date);
+    });
+    return makeDataset(last, labels);
   }
 
   if (mode === "week") {
     const last7 = sorted.slice(-7);
-    return {
-      labels: last7.map((p) => formatDateShort(p.date)),
-      datasets: [
-        {
-          label: "Valeur du portefeuille (€)",
-          data: last7.map((p) => p.value),
-          tension: 0.35,
-          fill: true,
-          borderWidth: 2,
-          borderColor: "#D4AF37",
-          backgroundColor: "rgba(212,175,55,0.10)",
-          pointRadius: 4,
-          pointHoverRadius: 6,
-          pointBackgroundColor: "#D4AF37",
-        },
-      ],
-    };
+    const labels = last7.map((p) => formatDateShort(p.date));
+    return makeDataset(last7, labels);
   }
 
   if (mode === "month") {
     const last30 = sorted.slice(-30);
-    return {
-      labels: last30.map((p) => formatDateShort(p.date)),
-      datasets: [
-        {
-          label: "Valeur du portefeuille (€)",
-          data: last30.map((p) => p.value),
-          tension: 0.35,
-          fill: true,
-          borderWidth: 2,
-          borderColor: "#D4AF37",
-          backgroundColor: "rgba(212,175,55,0.10)",
-          pointRadius: 4,
-          pointHoverRadius: 6,
-          pointBackgroundColor: "#D4AF37",
-        },
-      ],
-    };
+    const labels = last30.map((p) => formatDateShort(p.date));
+    return makeDataset(last30, labels);
   }
 
   if (mode === "year") {
     const buckets = {};
     sorted.forEach((p) => {
       const d = new Date(p.date);
-      const key = `${d.getFullYear()}-${(d.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}`;
+      const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
       buckets[key] = p.value;
     });
 
     const keys = Object.keys(buckets).sort();
-    return {
-      labels: keys,
-      datasets: [
-        {
-          label: "Valeur du portefeuille (€)",
-          data: keys.map((k) => buckets[k]),
-          tension: 0.35,
-          fill: true,
-          borderWidth: 2,
-          borderColor: "#D4AF37",
-          backgroundColor: "rgba(212,175,55,0.10)",
-          pointRadius: 3,
-          pointHoverRadius: 4,
-          pointBackgroundColor: "#D4AF37",
-        },
-      ],
-    };
+    const points = keys.map((k) => ({ value: buckets[k] }));
+    return makeDataset(points, keys);
   }
 
   if (mode === "all") {
-    return {
-      labels: sorted.map((p) => formatDateShort(p.date)),
-      datasets: [
-        {
-          label: "Valeur du portefeuille (€)",
-          data: sorted.map((p) => p.value),
-          tension: 0.35,
-          fill: true,
-          borderWidth: 2,
-          borderColor: "#D4AF37",
-          backgroundColor: "rgba(212,175,55,0.10)",
-          pointRadius: 2,
-          pointHoverRadius: 3,
-          pointBackgroundColor: "#D4AF37",
-        },
-      ],
-    };
+    const labels = sorted.map((p) => formatDateShort(p.date));
+    return makeDataset(sorted, labels);
   }
 
   return null;
@@ -294,8 +237,7 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
     for (const k of candidates) {
       const v = row?.[k];
       const n = Number(v);
-      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n))
-        return n;
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
     }
 
     // fallback: premier champ numérique “plausible”
@@ -313,8 +255,7 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
     for (const [k, v] of Object.entries(row || {})) {
       if (ignore.has(k)) continue;
       const n = Number(v);
-      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n))
-        return n;
+      if (v !== null && v !== undefined && v !== "" && Number.isFinite(n)) return n;
     }
 
     return 0;
@@ -322,8 +263,7 @@ const fetchAssetPricesDailySafe = async ({ instrumentIds, fromDayKey }) => {
 
   return (data || []).map((r) => {
     // ✅ FIX COMPARATEUR : normaliser la colonne day (DATE) => "YYYY-MM-DD"
-    const dayKey =
-      typeof r.day === "string" ? r.day : getDayKeyInTZ(r.day, APP_TZ);
+    const dayKey = typeof r.day === "string" ? r.day : getDayKeyInTZ(r.day, APP_TZ);
 
     return {
       instrument_id: r.instrument_id,
@@ -356,9 +296,13 @@ export default function Analyse() {
   const [portfolioHistory, setPortfolioHistory] = useState([]); // [{date, value}]
   const [historyMode, setHistoryMode] = useState("day");
 
+  // ✅ NEW : Affichage du graph d'évolution (Valeur / %)
+  const [historyValueMode, setHistoryValueMode] = useState("value"); // "value" | "perf"
+
   // ✅ comparaison: instrumentHistoryMap basé sur asset_prices_daily (1 point/jour)
   const [instrumentHistoryMap, setInstrumentHistoryMap] = useState({});
 
+  // ✅ (inchangé) tes states
   const [selectedHolding1, setSelectedHolding1] = useState("");
   const [selectedHolding2, setSelectedHolding2] = useState("");
 
@@ -416,9 +360,7 @@ export default function Analyse() {
       // 1) comptes
       const { data: accounts, error: accError } = await supabase
         .from("accounts")
-        .select(
-          "id, user_id, name, type, currency, initial_amount, current_amount, created_at"
-        )
+        .select("id, user_id, name, type, currency, initial_amount, current_amount, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: true });
 
@@ -427,23 +369,15 @@ export default function Analyse() {
       // 2) holdings
       const { data: holdingsData, error: holdError } = await supabase
         .from("holdings")
-        .select(
-          "id, user_id, account_id, instrument_id, quantity, avg_buy_price, current_price, current_value, asset_label"
-        )
+        .select("id, user_id, account_id, instrument_id, quantity, avg_buy_price, current_price, current_value, asset_label")
         .eq("user_id", userId);
 
       if (holdError) throw holdError;
 
-      const accountsById = Object.fromEntries(
-        (accounts || []).map((a) => [a.id, a])
-      );
+      const accountsById = Object.fromEntries((accounts || []).map((a) => [a.id, a]));
 
       const instrumentIds = Array.from(
-        new Set(
-          (holdingsData || [])
-            .map((h) => h.instrument_id)
-            .filter((id) => !!id)
-        )
+        new Set((holdingsData || []).map((h) => h.instrument_id).filter((id) => !!id))
       );
 
       let instrumentsById = {};
@@ -481,9 +415,7 @@ export default function Analyse() {
 
         if (instError) throw instError;
 
-        instrumentsById = Object.fromEntries(
-          (instruments || []).map((inst) => [inst.id, inst])
-        );
+        instrumentsById = Object.fromEntries((instruments || []).map((inst) => [inst.id, inst]));
 
         // J-1 (inchangé)
         const { data: prices1d } = await supabase
@@ -496,8 +428,7 @@ export default function Analyse() {
         if (prices1d) {
           for (const p of prices1d) {
             const id = p.instrument_id;
-            if (!prev1dByInstrument[id])
-              prev1dByInstrument[id] = toNumber(p.price);
+            if (!prev1dByInstrument[id]) prev1dByInstrument[id] = toNumber(p.price);
           }
         }
 
@@ -512,8 +443,7 @@ export default function Analyse() {
         if (prices30d) {
           for (const p of prices30d) {
             const id = p.instrument_id;
-            if (!prev30dByInstrument[id])
-              prev30dByInstrument[id] = toNumber(p.price);
+            if (!prev30dByInstrument[id]) prev30dByInstrument[id] = toNumber(p.price);
           }
         }
 
@@ -528,8 +458,7 @@ export default function Analyse() {
         if (pricesYtd) {
           for (const p of pricesYtd) {
             const id = p.instrument_id;
-            if (!prevYtdByInstrument[id])
-              prevYtdByInstrument[id] = toNumber(p.price);
+            if (!prevYtdByInstrument[id]) prevYtdByInstrument[id] = toNumber(p.price);
           }
         }
 
@@ -546,8 +475,7 @@ export default function Analyse() {
             const dayKey = r.day; // ✅ dayKey normalisé "YYYY-MM-DD"
             if (!id || !dayKey) continue;
 
-            if (!historicalPricesByInstrument[id])
-              historicalPricesByInstrument[id] = [];
+            if (!historicalPricesByInstrument[id]) historicalPricesByInstrument[id] = [];
             historicalPricesByInstrument[id].push({
               dayKey,
               date: dateFromDayKey(dayKey),
@@ -559,10 +487,7 @@ export default function Analyse() {
             historicalPricesByInstrument[id].sort((a, b) => a.date - b.date);
           });
         } catch (e) {
-          console.error(
-            "Comparateur: impossible de charger asset_prices_daily.",
-            e
-          );
+          console.error("Comparateur: impossible de charger asset_prices_daily.", e);
           historicalPricesByInstrument = {};
         }
       }
@@ -617,12 +542,8 @@ export default function Analyse() {
       });
 
       // comptes sans holdings
-      const accountsWithHoldings = new Set(
-        (holdingsData || []).map((h) => h.account_id)
-      );
-      const standaloneAccounts = (accounts || []).filter(
-        (a) => !accountsWithHoldings.has(a.id)
-      );
+      const accountsWithHoldings = new Set((holdingsData || []).map((h) => h.account_id));
+      const standaloneAccounts = (accounts || []).filter((a) => !accountsWithHoldings.has(a.id));
 
       let totalStandaloneValue = 0;
       let totalStandaloneInvested = 0;
@@ -637,8 +558,7 @@ export default function Analyse() {
 
       const holdingsWithAllocation = computedHoldings.map((h) => ({
         ...h,
-        allocationPct:
-          totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
+        allocationPct: totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
       // -------- CAMEMBERT PAR CATÉGORIE ----------
@@ -658,16 +578,11 @@ export default function Analyse() {
         addToCategory(label, toNumber(a.current_amount));
       });
 
-      const computedAllocations = Object.entries(categoryTotals).map(
-        ([label, amount]) => ({
-          label,
-          percent:
-            totalValue > 0
-              ? Math.round((Number(amount) / totalValue) * 100)
-              : 0,
-          color: palette[label] || "#6B7280",
-        })
-      );
+      const computedAllocations = Object.entries(categoryTotals).map(([label, amount]) => ({
+        label,
+        percent: totalValue > 0 ? Math.round((Number(amount) / totalValue) * 100) : 0,
+        color: palette[label] || "#6B7280",
+      }));
 
       // -------- RÉPARTITION PAR TYPE DE COMPTE ----------
       const accountValueMap = {};
@@ -676,20 +591,15 @@ export default function Analyse() {
       });
 
       holdingsWithAllocation.forEach((h) => {
-        if (accountValueMap[h.accountId] === undefined)
-          accountValueMap[h.accountId] = 0;
+        if (accountValueMap[h.accountId] === undefined) accountValueMap[h.accountId] = 0;
         accountValueMap[h.accountId] += h.value;
       });
 
       standaloneAccounts.forEach((a) => {
-        accountValueMap[a.id] =
-          (accountValueMap[a.id] || 0) + toNumber(a.current_amount);
+        accountValueMap[a.id] = (accountValueMap[a.id] || 0) + toNumber(a.current_amount);
       });
 
-      const totalAccountsValue = Object.values(accountValueMap).reduce(
-        (sum, v) => sum + v,
-        0
-      );
+      const totalAccountsValue = Object.values(accountValueMap).reduce((sum, v) => sum + v, 0);
 
       const accountTypeTotals = {};
       (accounts || []).forEach((a) => {
@@ -702,10 +612,7 @@ export default function Analyse() {
       const computedAccountTypeAlloc = Object.entries(accountTypeTotals)
         .map(([label, amount]) => ({
           label,
-          percent:
-            totalAccountsValue > 0
-              ? Math.round((amount / totalAccountsValue) * 100)
-              : 0,
+          percent: totalAccountsValue > 0 ? Math.round((amount / totalAccountsValue) * 100) : 0,
         }))
         .sort((a, b) => b.percent - a.percent);
 
@@ -728,10 +635,7 @@ export default function Analyse() {
       }
 
       const totalReturnPct =
-        totalInvested > 0
-          ? Math.round(((totalValue - totalInvested) / totalInvested) * 1000) /
-            10
-          : 0;
+        totalInvested > 0 ? Math.round(((totalValue - totalInvested) / totalInvested) * 1000) / 10 : 0;
 
       setHoldings(holdingsWithAllocation);
       setAssetAllocations(computedAllocations);
@@ -767,8 +671,7 @@ export default function Analyse() {
   const totalValueDisplay = formatCurrency(summary.totalValue);
 
   // ---------- DATA CAMEMBERT ----------
-  const hasAllocations =
-    assetAllocations.length > 0 && assetAllocations.some((a) => a.percent > 0);
+  const hasAllocations = assetAllocations.length > 0 && assetAllocations.some((a) => a.percent > 0);
 
   const doughnutData = {
     labels: assetAllocations.map((a) => a.label),
@@ -805,10 +708,7 @@ export default function Analyse() {
   };
 
   // ---------- COURBE (avec multi-périodes) ----------
-  const performanceHistoryData = buildHistoryDataset(
-    portfolioHistory,
-    historyMode
-  );
+  const performanceHistoryData = buildHistoryDataset(portfolioHistory, historyMode, historyValueMode);
 
   const historyModeLabel = {
     day: "Journalier",
@@ -829,6 +729,14 @@ export default function Analyse() {
         bodyColor: "#E5E7EB",
         padding: 10,
         cornerRadius: 12,
+        callbacks: {
+          label: (ctx) => {
+            const v = ctx.parsed.y;
+            if (v === null || v === undefined) return "—";
+            if (historyValueMode === "perf") return `${Number(v).toFixed(1)} %`;
+            return formatCurrency(v);
+          },
+        },
       },
     },
     scales: {
@@ -849,12 +757,14 @@ export default function Analyse() {
         ticks: {
           color: "#9CA3AF",
           font: { size: 11 },
-          callback: (value) =>
-            new Intl.NumberFormat("fr-FR", {
+          callback: (value) => {
+            if (historyValueMode === "perf") return `${value} %`;
+            return new Intl.NumberFormat("fr-FR", {
               style: "currency",
               currency: "EUR",
               maximumFractionDigits: 0,
-            }).format(value),
+            }).format(value);
+          },
         },
       },
     },
@@ -864,8 +774,7 @@ export default function Analyse() {
   const stdDev = (arr) => {
     if (!arr || arr.length === 0) return 0;
     const mean = arr.reduce((s, x) => s + x, 0) / arr.length;
-    const variance =
-      arr.reduce((s, x) => s + (x - mean) * (x - mean), 0) / arr.length;
+    const variance = arr.reduce((s, x) => s + (x - mean) * (x - mean), 0) / arr.length;
     return Math.sqrt(variance);
   };
 
@@ -887,11 +796,7 @@ export default function Analyse() {
   else volatilityScore = 5;
 
   const volatilityLabel =
-    volatilityScore <= 2
-      ? "Volatilité faible"
-      : volatilityScore === 3
-      ? "Volatilité moyenne"
-      : "Volatilité élevée";
+    volatilityScore <= 2 ? "Volatilité faible" : volatilityScore === 3 ? "Volatilité moyenne" : "Volatilité élevée";
 
   let maxDrawdown = 0;
   if (sortedHistory.length > 0) {
@@ -905,13 +810,7 @@ export default function Analyse() {
   }
   const maxDrawdownPct = Math.round(maxDrawdown * 10) / 10;
 
-  const maxWeightPct =
-    holdings.length > 0
-      ? holdings.reduce(
-          (m, h) => (h.allocationPct > m ? h.allocationPct : m),
-          0
-        )
-      : 0;
+  const maxWeightPct = holdings.length > 0 ? holdings.reduce((m, h) => (h.allocationPct > m ? h.allocationPct : m), 0) : 0;
 
   let diversificationScore = 0;
   if (maxWeightPct === 0) diversificationScore = 0;
@@ -928,8 +827,7 @@ export default function Analyse() {
       ? "Portefeuille moyennement diversifié"
       : "Portefeuille bien diversifié";
 
-  const cashEntry =
-    assetAllocations.find((a) => a.label === "Liquidités") || null;
+  const cashEntry = assetAllocations.find((a) => a.label === "Liquidités") || null;
   const cashPct = cashEntry ? cashEntry.percent : 0;
 
   let liquidityScore = 0;
@@ -939,8 +837,7 @@ export default function Analyse() {
   else if (cashPct < 50) liquidityScore = 5;
   else liquidityScore = 3;
 
-  const investEntry =
-    assetAllocations.find((a) => a.label === "Investissements") || null;
+  const investEntry = assetAllocations.find((a) => a.label === "Investissements") || null;
   const investPct = investEntry ? investEntry.percent : 0;
 
   let horizonScore = 0;
@@ -981,12 +878,7 @@ export default function Analyse() {
     datasets: [
       {
         label: "Profil de risque",
-        data: [
-          volatilityScore,
-          diversificationScore,
-          liquidityScore,
-          horizonScore,
-        ],
+        data: [volatilityScore, diversificationScore, liquidityScore, horizonScore],
         borderColor: "#D4AF37",
         backgroundColor: "rgba(212,175,55,0.16)",
         borderWidth: 2,
@@ -1035,28 +927,49 @@ export default function Analyse() {
 
   const bestHolding =
     holdings.length > 0
-      ? holdings.reduce(
-          (best, h) =>
-            best === null || h.monthlyChangePct > best.monthlyChangePct
-              ? h
-              : best,
-          null
-        )
+      ? holdings.reduce((best, h) => (best === null || h.monthlyChangePct > best.monthlyChangePct ? h : best), null)
       : null;
 
   const worstHolding =
     holdings.length > 0
-      ? holdings.reduce(
-          (worst, h) =>
-            worst === null || h.monthlyChangePct < worst.monthlyChangePct
-              ? h
-              : worst,
-          null
-        )
+      ? holdings.reduce((worst, h) => (worst === null || h.monthlyChangePct < worst.monthlyChangePct ? h : worst), null)
       : null;
 
   // ---------- COMPARAISON ----------
   // ✅ MODIF UNIQUEMENT DU COMPARATEUR :
+  // - EVITER LES DOUBLONS dans les selects (si même instrument sur plusieurs comptes)
+  // - on garde tes states selectedHolding1/2, mais on les fait pointer vers instrumentId
+  const uniqueHoldingsForCompare = useMemo(() => {
+    const map = new Map(); // instrumentId -> aggregated row
+    for (const h of holdings || []) {
+      if (!h.instrumentId) continue;
+      if (!map.has(h.instrumentId)) {
+        map.set(h.instrumentId, {
+          ...h,
+          id: h.instrumentId, // ✅ IMPORTANT : l'id utilisé dans le <select> devient instrumentId
+        });
+      } else {
+        // on cumule uniquement ce qui sert au comparateur (quantity)
+        const agg = map.get(h.instrumentId);
+        agg.quantity = toNumber(agg.quantity) + toNumber(h.quantity);
+        // (le reste inchangé : name/ticker restent ceux du 1er)
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (a.name || "").localeCompare(b.name || "", "fr"));
+  }, [holdings]);
+
+  // ✅ évite de pouvoir choisir le même placement sur Ligne 1 et Ligne 2
+  useEffect(() => {
+    if (selectedHolding1 && selectedHolding2 && String(selectedHolding1) === String(selectedHolding2)) {
+      setSelectedHolding2("");
+    }
+  }, [selectedHolding1, selectedHolding2]);
+
+  const holdingsForSelect2 = useMemo(() => {
+    if (!selectedHolding1) return uniqueHoldingsForCompare;
+    return uniqueHoldingsForCompare.filter((h) => String(h.id) !== String(selectedHolding1));
+  }, [uniqueHoldingsForCompare, selectedHolding1]);
+
   // - timeline (X) basée sur asset_prices_daily.day
   // - on aligne par "dayKey" (YYYY-MM-DD)
   // - carry-forward (dernier prix connu <= jour demandé)
@@ -1071,17 +984,12 @@ export default function Analyse() {
     const normalized = priceHistory
       .map((p) => ({
         ...p,
-        dayKey:
-          typeof p.dayKey === "string"
-            ? p.dayKey
-            : getDayKeyInTZ(p.dayKey, APP_TZ),
+        dayKey: typeof p.dayKey === "string" ? p.dayKey : getDayKeyInTZ(p.dayKey, APP_TZ),
       }))
       .filter((p) => !!p.dayKey);
 
     // Tri par dayKey (string) => ordre chrono garanti
-    const sortedByDayKey = [...normalized].sort((a, b) =>
-      String(a.dayKey).localeCompare(String(b.dayKey))
-    );
+    const sortedByDayKey = [...normalized].sort((a, b) => String(a.dayKey).localeCompare(String(b.dayKey)));
 
     const dayKeys = sortedByDayKey.map((p) => String(p.dayKey));
     const prices = sortedByDayKey.map((p) => toNumber(p.price));
@@ -1131,28 +1039,18 @@ export default function Analyse() {
     return hasAny ? data : null;
   };
 
-  const selectedObj1 = holdings.find(
-    (h) => String(h.id) === String(selectedHolding1)
-  );
-  const selectedObj2 = holdings.find(
-    (h) => String(h.id) === String(selectedHolding2)
-  );
+  // ✅ sélection sur la liste unique (id = instrumentId)
+  const selectedObj1 = uniqueHoldingsForCompare.find((h) => String(h.id) === String(selectedHolding1));
+  const selectedObj2 = uniqueHoldingsForCompare.find((h) => String(h.id) === String(selectedHolding2));
 
-  // ✅ FIX: timeline basée sur asset_prices_daily.day (pas portfolio_history_daily)
+  // ✅ timeline basée sur asset_prices_daily.day (pas portfolio_history_daily)
   const buildComparisonDayKeys = () => {
-    const ids = [selectedObj1?.instrumentId, selectedObj2?.instrumentId].filter(
-      Boolean
-    );
+    const ids = [selectedObj1?.instrumentId, selectedObj2?.instrumentId].filter(Boolean);
 
     const set = new Set();
     ids.forEach((id) => {
       (instrumentHistoryMap[id] || []).forEach((p) => {
-        const k =
-          typeof p?.dayKey === "string"
-            ? p.dayKey
-            : p?.dayKey
-            ? String(p.dayKey)
-            : null;
+        const k = typeof p?.dayKey === "string" ? p.dayKey : p?.dayKey ? String(p.dayKey) : null;
         if (k) set.add(k);
       });
     });
@@ -1194,12 +1092,8 @@ export default function Analyse() {
 
   const comparisonLabels = comparisonPoints.map((p) => formatDateShort(p.date));
 
-  const series1Raw = selectedObj1
-    ? buildHoldingSeriesForComparison(selectedObj1, comparisonPoints)
-    : null;
-  const series2Raw = selectedObj2
-    ? buildHoldingSeriesForComparison(selectedObj2, comparisonPoints)
-    : null;
+  const series1Raw = selectedObj1 ? buildHoldingSeriesForComparison(selectedObj1, comparisonPoints) : null;
+  const series2Raw = selectedObj2 ? buildHoldingSeriesForComparison(selectedObj2, comparisonPoints) : null;
 
   const normalizeToPerf = (series) => {
     if (!series || !series.length) return null;
@@ -1214,10 +1108,8 @@ export default function Analyse() {
     });
   };
 
-  const series1 =
-    comparisonValueMode === "value" ? series1Raw : normalizeToPerf(series1Raw);
-  const series2 =
-    comparisonValueMode === "value" ? series2Raw : normalizeToPerf(series2Raw);
+  const series1 = comparisonValueMode === "value" ? series1Raw : normalizeToPerf(series1Raw);
+  const series2 = comparisonValueMode === "value" ? series2Raw : normalizeToPerf(series2Raw);
 
   // ✅ FIX COMPARATEUR : si on a 1 seul point, il faut afficher le point sinon on ne voit rien
   const pointRadiusFor = (series) => {
@@ -1239,9 +1131,9 @@ export default function Analyse() {
                     fill: false,
                     borderWidth: 2,
                     borderColor: "#D4AF37",
-                    pointRadius: pointRadiusFor(series1), // ✅ FIX COMPARATEUR
+                    pointRadius: pointRadiusFor(series1),
                     pointHoverRadius: 4,
-                    spanGaps: true, // ✅ pour éviter des trous si quelques null
+                    spanGaps: true,
                   },
                 ]
               : []),
@@ -1254,7 +1146,7 @@ export default function Analyse() {
                     fill: false,
                     borderWidth: 2,
                     borderColor: "#4B5563",
-                    pointRadius: pointRadiusFor(series2), // ✅ FIX COMPARATEUR
+                    pointRadius: pointRadiusFor(series2),
                     pointHoverRadius: 4,
                     spanGaps: true,
                   },
@@ -1336,47 +1228,19 @@ export default function Analyse() {
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         {/* TITRE + EMAIL */}
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
-          <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
-            OLYMPE
-          </p>
-          <p className="text-xs text-white/50 -mt-1">
-            {userEmail || "Finance dashboard"}
-          </p>
+          <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">OLYMPE</p>
+          <p className="text-xs text-white/50 -mt-1">{userEmail || "Finance dashboard"}</p>
         </div>
 
         {/* Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <SidebarItem
-            icon={Home}
-            label="Tableau de bord"
-            onClick={() => navigate("/dashboard")}
-          />
-          <SidebarItem
-            icon={Wallet}
-            label="Comptes & placements"
-            onClick={() => navigate("/accounts")}
-          />
-          <SidebarItem
-            icon={BarChart3}
-            label="Analyse"
-            active
-            onClick={() => navigate("/analyse")}
-          />
-          <SidebarItem
-            icon={PieChart}
-            label="Portefeuille"
-            onClick={() => navigate("/portefeuille")}
-          />
-          <SidebarItem
-            icon={Sparkles}
-            label="Simulation"
-            onClick={() => navigate("/simulation")}
-          />
-          <SidebarItem
-            icon={GraduationCap}
-            label="Glossaire"
-            onClick={() => navigate("/glossaire")}
-          />
+          <SidebarItem icon={Home} label="Tableau de bord" onClick={() => navigate("/dashboard")} />
+          <SidebarItem icon={Wallet} label="Comptes & placements" onClick={() => navigate("/accounts")} />
+          <SidebarItem icon={BarChart3} label="Analyse" active onClick={() => navigate("/analyse")} />
+          <SidebarItem icon={PieChart} label="Portefeuille" onClick={() => navigate("/portefeuille")} />
+          <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
+          <SidebarItem icon={SlidersHorizontal} label="Simulation" active onClick={() => navigate("/simulation")} />
+          <SidebarItem icon={Bot} label="Assistant IA" onClick={() => navigate("/assistant")} />
         </nav>
 
         {/* Bottom */}
@@ -1403,20 +1267,14 @@ export default function Analyse() {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-400">
-              Analyse
-            </p>
-            <p className="text-sm text-gray-700">
-              Comprendre la performance et le risque de votre portefeuille
-            </p>
+            <p className="text-xs uppercase tracking-[0.25em] text-gray-400">Analyse</p>
+            <p className="text-sm text-gray-700">Comprendre la performance et le risque de votre portefeuille</p>
           </div>
 
           <div className="flex items-center gap-6">
             <div className="text-right">
               <p className="text-xs text-gray-400">Valeur totale</p>
-              <p className="text-sm font-semibold text-[#D4AF37]">
-                {totalValueDisplay}
-              </p>
+              <p className="text-sm font-semibold text-[#D4AF37]">{totalValueDisplay}</p>
             </div>
           </div>
         </header>
@@ -1439,25 +1297,19 @@ export default function Analyse() {
                 {[
                   {
                     label: "Performance totale",
-                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${
-                      summary.totalReturnPct
-                    } %`,
+                    value: `${summary.totalReturnPct > 0 ? "+" : ""}${summary.totalReturnPct} %`,
                     subtitle: "Par rapport aux montants investis",
                     positive: summary.totalReturnPct >= 0,
                   },
                   {
                     label: "Performance YTD",
-                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${
-                      summary.ytdReturnPct
-                    } %`,
+                    value: `${summary.ytdReturnPct > 0 ? "+" : ""}${summary.ytdReturnPct} %`,
                     subtitle: "Depuis le 2 janvier",
                     positive: summary.ytdReturnPct >= 0,
                   },
                   {
                     label: "Sur 30 jours",
-                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${
-                      summary.monthReturnPct
-                    } %`,
+                    value: `${summary.monthReturnPct > 0 ? "+" : ""}${summary.monthReturnPct} %`,
                     subtitle: "30 derniers jours",
                     positive: summary.monthReturnPct >= 0,
                   },
@@ -1467,19 +1319,8 @@ export default function Analyse() {
                     subtitle: `${summary.nbAccounts} comptes • ${summary.nbHoldings} lignes`,
                   },
                 ].map((item, index) => (
-                  <motion.div
-                    key={item.label}
-                    custom={index}
-                    variants={kpiVariants}
-                    initial="hidden"
-                    animate="show"
-                  >
-                    <KpiCard
-                      label={item.label}
-                      value={item.value}
-                      subtitle={item.subtitle}
-                      positive={item.positive}
-                    />
+                  <motion.div key={item.label} custom={index} variants={kpiVariants} initial="hidden" animate="show">
+                    <KpiCard label={item.label} value={item.value} subtitle={item.subtitle} positive={item.positive} />
                   </motion.div>
                 ))}
               </section>
@@ -1489,35 +1330,58 @@ export default function Analyse() {
                 <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
                   <div className="flex items-center justify-between mb-4 gap-3">
                     <div>
-                      <h2 className="text-sm font-semibold text-gray-800">
-                        Évolution de la valeur du portefeuille
-                      </h2>
+                      <h2 className="text-sm font-semibold text-gray-800">Évolution de la valeur du portefeuille</h2>
                       <p className="text-xs text-gray-500">
-                        Vue {historyModeLabel.toLowerCase()} de la valeur totale
-                        estimée.
+                        Vue {historyModeLabel.toLowerCase()} de{" "}
+                        {historyValueMode === "perf" ? "la performance relative" : "la valeur totale estimée"}.
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
-                      {[
-                        { id: "day", label: "Jour" },
-                        { id: "week", label: "Semaine" },
-                        { id: "month", label: "Mois" },
-                        { id: "year", label: "Année" },
-                        { id: "all", label: "Depuis le début" },
-                      ].map((m) => (
+                    <div className="flex items-center gap-3">
+                      {/* ✅ NEW : toggle Valeur / % */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
                         <button
-                          key={m.id}
-                          onClick={() => setHistoryMode(m.id)}
+                          onClick={() => setHistoryValueMode("value")}
                           className={`px-2.5 py-1 rounded-full transition text-[11px] ${
-                            historyMode === m.id
+                            historyValueMode === "value"
                               ? "bg-white shadow-sm text-gray-900"
                               : "text-gray-500 hover:text-gray-900"
                           }`}
                         >
-                          {m.label}
+                          Valeur (€)
                         </button>
-                      ))}
+                        <button
+                          onClick={() => setHistoryValueMode("perf")}
+                          className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                            historyValueMode === "perf"
+                              ? "bg-white shadow-sm text-gray-900"
+                              : "text-gray-500 hover:text-gray-900"
+                          }`}
+                        >
+                          Performance (%)
+                        </button>
+                      </div>
+
+                      {/* (inchangé) toggle période */}
+                      <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 text-[11px]">
+                        {[
+                          { id: "day", label: "Jour" },
+                          { id: "week", label: "Semaine" },
+                          { id: "month", label: "Mois" },
+                          { id: "year", label: "Année" },
+                          { id: "all", label: "Depuis le début" },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setHistoryMode(m.id)}
+                            className={`px-2.5 py-1 rounded-full transition text-[11px] ${
+                              historyMode === m.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -1525,10 +1389,7 @@ export default function Analyse() {
                     <div className="absolute inset-x-6 bottom-0 h-24 bg-gradient-to-t from-[#F5E7B3] via-transparent to-transparent opacity-40 pointer-events-none" />
                     <div className="relative h-full">
                       {performanceHistoryData ? (
-                        <Line
-                          data={performanceHistoryData}
-                          options={performanceHistoryOptions}
-                        />
+                        <Line data={performanceHistoryData} options={performanceHistoryOptions} />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-gray-400">
                           Impossible de calculer l’historique pour le moment.
@@ -1540,48 +1401,33 @@ export default function Analyse() {
 
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-4">
                   <div>
-                    <h2 className="text-sm font-semibold text-gray-800 mb-1">
-                      Meilleure & pire ligne (30 jours)
-                    </h2>
+                    <h2 className="text-sm font-semibold text-gray-800 mb-1">Meilleure & pire ligne (30 jours)</h2>
                     <p className="text-xs text-gray-500">
-                      Basé sur la performance à 30 jours des lignes de votre
-                      portefeuille.
+                      Basé sur la performance à 30 jours des lignes de votre portefeuille.
                     </p>
                   </div>
 
                   <div className="space-y-3">
                     <div className="border border-emerald-100 rounded-xl p-3 bg-emerald-50/60">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-700 mb-1">
-                        Meilleure ligne
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {bestHolding ? bestHolding.name : "—"}
-                      </p>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-700 mb-1">Meilleure ligne</p>
+                      <p className="text-sm font-semibold text-gray-900">{bestHolding ? bestHolding.name : "—"}</p>
                       <p className="text-xs text-emerald-700 mt-1">
-                        {bestHolding
-                          ? `+${Math.round(bestHolding.monthlyChangePct * 10) / 10} %`
-                          : "—"}
+                        {bestHolding ? `+${Math.round(bestHolding.monthlyChangePct * 10) / 10} %` : "—"}
                       </p>
                     </div>
 
                     <div className="border border-red-100 rounded-xl p-3 bg-red-50/60">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-red-700 mb-1">
-                        Pire ligne
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {worstHolding ? worstHolding.name : "—"}
-                      </p>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-red-700 mb-1">Pire ligne</p>
+                      <p className="text-sm font-semibold text-gray-900">{worstHolding ? worstHolding.name : "—"}</p>
                       <p className="text-xs text-red-600 mt-1">
-                        {worstHolding
-                          ? `${Math.round(worstHolding.monthlyChangePct * 10) / 10} %`
-                          : "—"}
+                        {worstHolding ? `${Math.round(worstHolding.monthlyChangePct * 10) / 10} %` : "—"}
                       </p>
                     </div>
                   </div>
 
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Les performances sont calculées à partir des prix enregistrés
-                    dans Olympe et sont fournies à titre exclusivement pédagogique.
+                    Les performances sont calculées à partir des prix enregistrés dans Olympe et sont fournies à titre
+                    exclusivement pédagogique.
                   </p>
                 </div>
               </section>
@@ -1591,12 +1437,9 @@ export default function Analyse() {
                 <div className="flex flex-col gap-4 mb-4">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div>
-                      <h2 className="text-sm font-semibold text-gray-800">
-                        Comparer deux placements
-                      </h2>
+                      <h2 className="text-sm font-semibold text-gray-800">Comparer deux placements</h2>
                       <p className="text-xs text-gray-500">
-                        Visualisez l’évolution de la valeur ou de la performance
-                        de chaque ligne.
+                        Visualisez l’évolution de la valeur ou de la performance de chaque ligne.
                       </p>
                     </div>
 
@@ -1609,7 +1452,8 @@ export default function Analyse() {
                           className="text-xs border border-gray-200 rounded-full px-3 py-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                         >
                           <option value="">Choisir un placement…</option>
-                          {holdings.map((h) => (
+                          {/* ✅ CHANGEMENT : liste unique (pas de doublons) */}
+                          {uniqueHoldingsForCompare.map((h) => (
                             <option key={h.id} value={h.id}>
                               {h.name}
                               {h.ticker ? ` (${h.ticker})` : ""}
@@ -1619,16 +1463,15 @@ export default function Analyse() {
                       </div>
 
                       <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-gray-500">
-                          Ligne 2 (optionnel)
-                        </span>
+                        <span className="text-[11px] text-gray-500">Ligne 2 (optionnel)</span>
                         <select
                           value={selectedHolding2}
                           onChange={(e) => setSelectedHolding2(e.target.value)}
                           className="text-xs border border-gray-200 rounded-full px-3 py-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
                         >
                           <option value="">Aucune / comparer plus tard</option>
-                          {holdings.map((h) => (
+                          {/* ✅ CHANGEMENT : liste unique + on enlève l'option déjà choisie en ligne 1 */}
+                          {holdingsForSelect2.map((h) => (
                             <option key={h.id} value={h.id}>
                               {h.name}
                               {h.ticker ? ` (${h.ticker})` : ""}
@@ -1646,9 +1489,7 @@ export default function Analyse() {
                         <button
                           onClick={() => setComparisonValueMode("value")}
                           className={`px-3 py-1 rounded-full transition ${
-                            comparisonValueMode === "value"
-                              ? "bg-white shadow-sm text-gray-900"
-                              : "text-gray-500"
+                            comparisonValueMode === "value" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                           }`}
                         >
                           Valeur (€)
@@ -1656,9 +1497,7 @@ export default function Analyse() {
                         <button
                           onClick={() => setComparisonValueMode("perf")}
                           className={`px-3 py-1 rounded-full transition ${
-                            comparisonValueMode === "perf"
-                              ? "bg-white shadow-sm text-gray-900"
-                              : "text-gray-500"
+                            comparisonValueMode === "perf" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                           }`}
                         >
                           Performance (%)
@@ -1680,9 +1519,7 @@ export default function Analyse() {
                             key={m.id}
                             onClick={() => setComparisonMode(m.id)}
                             className={`px-3 py-1 rounded-full transition ${
-                              comparisonMode === m.id
-                                ? "bg-white shadow-sm text-gray-900"
-                                : "text-gray-500"
+                              comparisonMode === m.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                             }`}
                           >
                             {m.label}
@@ -1723,8 +1560,8 @@ export default function Analyse() {
                 </div>
 
                 <p className="mt-3 text-[11px] text-gray-400">
-                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre la
-                  variation relative depuis le début de la période.
+                  En mode “Performance (%)”, chaque courbe démarre à 0 % et montre la variation relative depuis le début
+                  de la période.
                 </p>
               </section>
 
@@ -1735,62 +1572,37 @@ export default function Analyse() {
                     <Radar data={riskRadarData} options={riskRadarOptions} />
                   </div>
                   <div className="w-full md:w-1/2 space-y-3">
-                    <h2 className="text-sm font-semibold text-gray-800">
-                      Profil de risque global
-                    </h2>
+                    <h2 className="text-sm font-semibold text-gray-800">Profil de risque global</h2>
                     <p className="text-xs text-gray-500">
-                      Basé sur la volatilité quotidienne, les plus fortes baisses et la
-                      répartition.
+                      Basé sur la volatilité quotidienne, les plus fortes baisses et la répartition.
                     </p>
 
                     <div className="space-y-2 text-xs text-gray-700">
                       <p>
-                        <span className="font-semibold text-gray-900">
-                          Niveau global :
-                        </span>{" "}
-                        {riskProfile.globalLabel}
+                        <span className="font-semibold text-gray-900">Niveau global :</span> {riskProfile.globalLabel}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">
-                          Volatilité :
-                        </span>{" "}
-                        {riskProfile.volatilityLabel}{" "}
-                        {dailyReturns.length > 5 &&
-                          `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
+                        <span className="font-semibold text-gray-900">Volatilité :</span> {riskProfile.volatilityLabel}{" "}
+                        {dailyReturns.length > 5 && `(σ ≈ ${volatilityPct.toFixed(2)} % / jour)`}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">
-                          Pire baisse enregistrée :
-                        </span>{" "}
-                        {maxDrawdownPct} %
+                        <span className="font-semibold text-gray-900">Pire baisse enregistrée :</span> {maxDrawdownPct} %
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">
-                          Diversification :
-                        </span>{" "}
-                        {riskProfile.diversificationLabel}
+                        <span className="font-semibold text-gray-900">Diversification :</span> {riskProfile.diversificationLabel}
                       </p>
                       <p>
-                        <span className="font-semibold text-gray-900">
-                          Liquidités :
-                        </span>{" "}
-                        {cashPct} % du portefeuille
+                        <span className="font-semibold text-gray-900">Liquidités :</span> {cashPct} % du portefeuille
                       </p>
                     </div>
 
-                    <p className="text-[11px] text-gray-400">
-                      Ces indicateurs ne constituent pas un conseil en investissement.
-                    </p>
+                    <p className="text-[11px] text-gray-400">Ces indicateurs ne constituent pas un conseil en investissement.</p>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                  <h2 className="text-sm font-semibold text-gray-800 mb-1">
-                    Analyse des principales lignes
-                  </h2>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Top 5 des lignes les plus pondérées.
-                  </p>
+                  <h2 className="text-sm font-semibold text-gray-800 mb-1">Analyse des principales lignes</h2>
+                  <p className="text-xs text-gray-500 mb-3">Top 5 des lignes les plus pondérées.</p>
 
                   <div className="overflow-hidden rounded-xl border border-gray-100">
                     <table className="min-w-full text-xs">
@@ -1805,10 +1617,7 @@ export default function Analyse() {
                       <tbody>
                         {holdingsAnalysisRows.length === 0 ? (
                           <tr>
-                            <td
-                              colSpan={4}
-                              className="px-3 py-4 text-center text-gray-400 text-[11px]"
-                            >
+                            <td colSpan={4} className="px-3 py-4 text-center text-gray-400 text-[11px]">
                               Pas encore assez de données pour analyser vos lignes.
                             </td>
                           </tr>
@@ -1823,34 +1632,20 @@ export default function Analyse() {
                             >
                               <td className="px-3 py-2">
                                 <div className="flex flex-col">
-                                  <span className="text-xs font-medium text-gray-900">
-                                    {h.name}
-                                  </span>
-                                  {h.ticker && (
-                                    <span className="text-[10px] text-gray-500">
-                                      {h.ticker}
-                                    </span>
-                                  )}
+                                  <span className="text-xs font-medium text-gray-900">{h.name}</span>
+                                  {h.ticker && <span className="text-[10px] text-gray-500">{h.ticker}</span>}
                                 </div>
                               </td>
-                              <td className="px-3 py-2 text-right text-xs text-gray-700">
-                                {h.weightPct} %
-                              </td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">{h.weightPct} %</td>
                               <td
                                 className={`px-3 py-2 text-right text-xs ${
-                                  h.perfPct > 0
-                                    ? "text-emerald-600"
-                                    : h.perfPct < 0
-                                    ? "text-red-600"
-                                    : "text-gray-600"
+                                  h.perfPct > 0 ? "text-emerald-600" : h.perfPct < 0 ? "text-red-600" : "text-gray-600"
                                 }`}
                               >
                                 {h.perfPct > 0 ? "+" : ""}
                                 {h.perfPct} %
                               </td>
-                              <td className="px-3 py-2 text-right text-xs text-gray-700">
-                                {h.volatility}
-                              </td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">{h.volatility}</td>
                             </motion.tr>
                           ))
                         )}
@@ -1864,12 +1659,8 @@ export default function Analyse() {
               <section className="bg-white rounded-2xl border border-gray-200 p-5">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                   <div>
-                    <h2 className="text-sm font-semibold text-gray-800">
-                      Répartition par grande catégorie
-                    </h2>
-                    <p className="text-xs text-gray-500">
-                      Liquidités, épargne, investissements, crypto, etc.
-                    </p>
+                    <h2 className="text-sm font-semibold text-gray-800">Répartition par grande catégorie</h2>
+                    <p className="text-xs text-gray-500">Liquidités, épargne, investissements, crypto, etc.</p>
                   </div>
                 </div>
 
@@ -1886,26 +1677,16 @@ export default function Analyse() {
 
                   <div className="space-y-2">
                     {assetAllocations.map((a) => (
-                      <div
-                        key={a.label}
-                        className="flex items-center justify-between text-xs"
-                      >
+                      <div key={a.label} className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: a.color }}
-                          />
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: a.color }} />
                           <span className="text-gray-700">{a.label}</span>
                         </div>
-                        <span className="text-gray-900 font-medium">
-                          {a.percent} %
-                        </span>
+                        <span className="text-gray-900 font-medium">{a.percent} %</span>
                       </div>
                     ))}
                     {assetAllocations.length === 0 && (
-                      <p className="text-[11px] text-gray-400">
-                        Ajoutez des comptes et des placements pour voir votre allocation.
-                      </p>
+                      <p className="text-[11px] text-gray-400">Ajoutez des comptes et des placements pour voir votre allocation.</p>
                     )}
                   </div>
                 </div>
@@ -1926,9 +1707,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
-        active
-          ? "bg-white/5 text-white"
-          : "text-white/60 hover:bg-white/5 hover:text-white"
+        active ? "bg-white/5 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
       } transition`}
     >
       <Icon size={16} />
@@ -1939,19 +1718,12 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
 
 function KpiCard({ label, value, subtitle, positive }) {
   const isNumber = typeof value === "string" && value.includes("%");
-  const isPositive =
-    positive !== undefined
-      ? positive
-      : isNumber
-      ? !value.startsWith("-")
-      : false;
+  const isPositive = positive !== undefined ? positive : isNumber ? !value.startsWith("-") : false;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col justify-between h-full">
       <div>
-        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
-          {label}
-        </p>
+        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">{label}</p>
         <p className="text-base font-semibold text-gray-900">{value}</p>
       </div>
       {subtitle && (

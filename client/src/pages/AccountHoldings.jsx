@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Plus,
   SlidersHorizontal,
+  Bot, // ✅ ajout icône Assistant IA
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -22,7 +23,6 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 /**
  * Helper : récupère le prix depuis l’Edge Function EODHD
- * (appel direct à l’URL de la function, comme dans ton test PowerShell)
  */
 async function fetchEodhdPrice(symbol) {
   if (!SUPABASE_URL) {
@@ -35,8 +35,6 @@ async function fetchEodhdPrice(symbol) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Si tu veux sécuriser un peu plus :
-        // apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ symbol }),
     });
@@ -49,7 +47,6 @@ async function fetchEodhdPrice(symbol) {
       return null;
     }
 
-    // gère number OU string "29,6545"
     const num =
       typeof data.price === "number"
         ? data.price
@@ -63,6 +60,51 @@ async function fetchEodhdPrice(symbol) {
     return num;
   } catch (err) {
     console.error("fetchEodhdPrice error:", err);
+    return null;
+  }
+}
+
+/**
+ * CoinGecko helpers (GRATUIT, pas de clé requise)
+ * - Search : renvoie des coins (id, name, symbol)
+ * - Price : renvoie prix EUR
+ */
+async function coingeckoSearch(query) {
+  try {
+    const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(
+      query
+    )}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+
+    const coins = Array.isArray(json?.coins) ? json.coins : [];
+    return coins.slice(0, 8).map((c) => ({
+      source: "coingecko",
+      id: c.id, // ex: "bitcoin"
+      symbol: String(c.symbol || "").toUpperCase(), // ex: "BTC"
+      description: c.name || c.id, // ex: "Bitcoin"
+      type: "crypto",
+      market_cap_rank: c.market_cap_rank ?? null,
+    }));
+  } catch (e) {
+    console.error("CoinGecko search error:", e);
+    return [];
+  }
+}
+
+async function coingeckoPriceEUR(coingeckoId) {
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
+      coingeckoId
+    )}&vs_currencies=eur`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const v = json?.[coingeckoId]?.eur;
+    return typeof v === "number" && v > 0 ? v : null;
+  } catch (e) {
+    console.error("CoinGecko price error:", e);
     return null;
   }
 }
@@ -103,10 +145,17 @@ export default function AccountHoldings() {
     quantityToSell: "",
   });
 
-  // état pour l'autocomplétion Finnhub
+  // état pour l'autocomplétion
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
+
+  // ✅ Détection compte crypto
+  const isCryptoAccount = useMemo(() => {
+    const p = String(account?.product || "").toLowerCase();
+    const t = String(account?.type || "").toLowerCase();
+    return p.includes("crypto") || t === "crypto";
+  }, [account]);
 
   // ----------- Auth + chargement compte + placements ----------- //
   useEffect(() => {
@@ -154,7 +203,9 @@ export default function AccountHoldings() {
         *,
         instrument:instruments!holdings_instrument_id_fkey (
           name,
-          symbol
+          symbol,
+          exchange,
+          asset_class
         )
       `
       )
@@ -191,14 +242,10 @@ export default function AccountHoldings() {
     setSearchError("");
   };
 
-  // --- Autocomplétion Finnhub (symbole OU libellé) --- //
+  // --- Autocomplétion : CoinGecko si compte crypto, sinon Finnhub --- //
   useEffect(() => {
-    if (!FINNHUB_API_KEY) return; // pas de clé -> pas de requête
-
     let query = form.symbol.trim();
-    if (!query) {
-      query = form.label.trim();
-    }
+    if (!query) query = form.label.trim();
 
     if (query.length < 2) {
       setSearchResults([]);
@@ -213,6 +260,22 @@ export default function AccountHoldings() {
       setSearchError("");
 
       try {
+        // ✅ CRYPTO -> CoinGecko
+        if (isCryptoAccount) {
+          const results = await coingeckoSearch(query);
+          if (!cancelled) setSearchResults(results);
+          return;
+        }
+
+        // ✅ ACTIONS/ETF -> Finnhub
+        if (!FINNHUB_API_KEY) {
+          if (!cancelled) {
+            setSearchResults([]);
+            setSearchError("Clé Finnhub manquante : suggestions indisponibles.");
+          }
+          return;
+        }
+
         const url = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(
           query
         )}&token=${FINNHUB_API_KEY}`;
@@ -220,14 +283,17 @@ export default function AccountHoldings() {
         const res = await fetch(url);
         if (!res.ok) {
           console.warn("Erreur API Finnhub search, status:", res.status);
-        } else {
-          const json = await res.json();
           if (!cancelled) {
-            setSearchResults(json.result || []);
+            setSearchResults([]);
+            setSearchError("Impossible de récupérer les suggestions.");
           }
+          return;
         }
+
+        const json = await res.json();
+        if (!cancelled) setSearchResults(json.result || []);
       } catch (err) {
-        console.error("Erreur Finnhub search:", err);
+        console.error("Autocomplete error:", err);
         if (!cancelled) {
           setSearchError("Impossible de récupérer les suggestions.");
           setSearchResults([]);
@@ -237,51 +303,77 @@ export default function AccountHoldings() {
       }
     };
 
-    const timer = setTimeout(run, 400); // petit debounce
-
+    const timer = setTimeout(run, 400);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.symbol, form.label]);
+  }, [form.symbol, form.label, isCryptoAccount]);
 
   // Quand l'utilisateur choisit une suggestion
   const handlePickSuggestion = async (item) => {
+    const isCoinGecko = item?.source === "coingecko";
+    const pickedSymbol = isCoinGecko
+      ? String(item.symbol || "").toUpperCase()
+      : item.symbol || "";
+
+    const pickedLabel = isCoinGecko
+      ? item.description || pickedSymbol
+      : item.description || item.symbol || "";
+
     // maj symbole + libellé visibles dans le formulaire
     setForm((prev) => ({
       ...prev,
-      symbol: item.symbol || "",
-      label: item.description || item.symbol || prev.label,
+      symbol: pickedSymbol,
+      label: pickedLabel || prev.label,
     }));
+
     setSearchResults([]);
     setSearchError("");
 
     // si pas de symbole, on s'arrête
-    if (!item.symbol) return;
+    if (!pickedSymbol) return;
+
+    // 🔒 Sécurité métier: sur compte crypto, on n’accepte que CoinGecko
+    if (isCryptoAccount && !isCoinGecko) {
+      setError(
+        "Ce compte est un compte crypto : sélectionne une cryptomonnaie (CoinGecko), pas un ETF/action."
+      );
+      return;
+    }
 
     // 1) on récupère ou crée l'instrument dans la BDD
+    // ⚠️ Sans modifier ta BDD : on stocke l’id coingecko dans exchange sous la forme `coingecko:<id>`
+    const exchangeKey = isCoinGecko && item.id ? `coingecko:${item.id}` : null;
+
     let instrumentId = null;
     try {
-      const { data: existing, error: existingError } = await supabase
-        .from("instruments")
-        .select("id")
-        .eq("symbol", item.symbol)
-        .limit(1);
+      let q = supabase.from("instruments").select("id, symbol, exchange");
 
+      if (isCoinGecko && exchangeKey) {
+        // ✅ Pour éviter collision avec ETFs (BTC/ETH), on identifie la crypto via exchange
+        q = q.eq("exchange", exchangeKey);
+      } else {
+        q = q.eq("symbol", pickedSymbol);
+      }
+
+      const { data: existing, error: existingError } = await q.limit(1);
       if (existingError) throw existingError;
 
       if (existing && existing.length > 0) {
         instrumentId = existing[0].id;
       } else {
+        const insertPayload = {
+          symbol: pickedSymbol,
+          name: pickedLabel || pickedSymbol,
+          asset_class: isCoinGecko ? "crypto" : item.type || null,
+          currency: isCoinGecko ? "EUR" : null,
+          exchange: isCoinGecko ? exchangeKey : null,
+        };
+
         const { data: inserted, error: insertError } = await supabase
           .from("instruments")
-          .insert({
-            symbol: item.symbol,
-            name: item.description || item.symbol,
-            asset_class: item.type || null,
-            currency: null,
-            exchange: null,
-          })
+          .insert(insertPayload)
           .select("id")
           .single();
 
@@ -290,53 +382,60 @@ export default function AccountHoldings() {
       }
     } catch (err) {
       console.error("Erreur Supabase instruments:", err);
+      setError("Erreur lors de la création/récupération de l'instrument.");
+      return;
     }
 
     if (instrumentId) {
       setForm((prev) => ({ ...prev, instrumentId }));
     }
 
-    // 2) on récupère le prix actuel : Finnhub d'abord, EODHD ensuite
+    // 2) on récupère le prix actuel
     let price = null;
 
-    // ---- Essai 1 : Finnhub ----
-    if (FINNHUB_API_KEY && item.symbol) {
-      try {
-        const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
-          item.symbol
-        )}&token=${FINNHUB_API_KEY}`;
+    // ✅ CRYPTO -> CoinGecko prix EUR
+    if (isCoinGecko && item.id) {
+      price = await coingeckoPriceEUR(item.id);
+    } else {
+      // ---- Essai 1 : Finnhub ----
+      if (FINNHUB_API_KEY && pickedSymbol) {
+        try {
+          const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
+            pickedSymbol
+          )}&token=${FINNHUB_API_KEY}`;
 
-        const res = await fetch(url);
-        if (!res.ok) {
-          console.warn("Erreur API Finnhub quote, status:", res.status);
-        } else {
-          const quote = await res.json();
-          console.log("Quote Finnhub pour", item.symbol, quote);
+          const res = await fetch(url);
+          if (!res.ok) {
+            console.warn("Erreur API Finnhub quote, status:", res.status);
+          } else {
+            const quote = await res.json();
+            console.log("Quote Finnhub pour", pickedSymbol, quote);
 
-          if (
-            quote &&
-            typeof quote.c === "number" &&
-            !Number.isNaN(quote.c) &&
-            quote.c > 0
-          ) {
-            price = quote.c;
+            if (
+              quote &&
+              typeof quote.c === "number" &&
+              !Number.isNaN(quote.c) &&
+              quote.c > 0
+            ) {
+              price = quote.c;
+            }
           }
+        } catch (err) {
+          console.error("Erreur Finnhub quote:", err);
         }
-      } catch (err) {
-        console.error("Erreur Finnhub quote:", err);
       }
-    }
 
-    // ---- Essai 2 : EODHD (fallback) ----
-    if (!price && item.symbol) {
-      const eodPrice = await fetchEodhdPrice(item.symbol);
-      console.log("Prix EODHD pour", item.symbol, eodPrice);
-      if (
-        typeof eodPrice === "number" &&
-        !Number.isNaN(eodPrice) &&
-        eodPrice > 0
-      ) {
-        price = eodPrice;
+      // ---- Essai 2 : EODHD (fallback) ----
+      if (!price && pickedSymbol) {
+        const eodPrice = await fetchEodhdPrice(pickedSymbol);
+        console.log("Prix EODHD pour", pickedSymbol, eodPrice);
+        if (
+          typeof eodPrice === "number" &&
+          !Number.isNaN(eodPrice) &&
+          eodPrice > 0
+        ) {
+          price = eodPrice;
+        }
       }
     }
 
@@ -344,7 +443,7 @@ export default function AccountHoldings() {
     if (price) {
       setForm((prev) => ({
         ...prev,
-        buyPrice: price.toFixed(2),
+        buyPrice: Number(price).toFixed(2),
       }));
     }
   };
@@ -355,10 +454,10 @@ export default function AccountHoldings() {
     if (!user || !account) return;
 
     const quantity = form.quantity
-      ? parseFloat(form.quantity.replace(",", "."))
+      ? parseFloat(String(form.quantity).replace(",", "."))
       : 0;
     const buyPrice = form.buyPrice
-      ? parseFloat(form.buyPrice.replace(",", "."))
+      ? parseFloat(String(form.buyPrice).replace(",", "."))
       : 0;
 
     if (!quantity || !buyPrice) {
@@ -369,9 +468,7 @@ export default function AccountHoldings() {
     }
 
     if (!form.instrumentId) {
-      setError(
-        "Merci de sélectionner un instrument dans la liste de suggestions."
-      );
+      setError("Merci de sélectionner un instrument dans la liste.");
       return;
     }
 
@@ -382,7 +479,7 @@ export default function AccountHoldings() {
     setError("");
 
     try {
-      // 1) On regarde si un holding existe déjà pour cet instrument sur ce compte
+      // 1) On regarde si un holding existe déjà
       const { data: existingRows, error: existingError } = await supabase
         .from("holdings")
         .select("*")
@@ -399,7 +496,7 @@ export default function AccountHoldings() {
       let holdingId = null;
 
       if (existingHolding) {
-        // 2a) Holding déjà existant → on met à jour la quantité + PRU
+        // Holding déjà existant → maj qty + PRU
         const oldQty = Number(existingHolding.quantity ?? 0);
         const oldPru = Number(existingHolding.avg_buy_price ?? 0);
         const newQty = oldQty + quantity;
@@ -425,7 +522,7 @@ export default function AccountHoldings() {
         if (updateError) throw updateError;
         holdingId = updated.id;
       } else {
-        // 2b) Aucun holding → on en crée un nouveau
+        // Nouveau holding
         const { data: inserted, error: insertHoldError } = await supabase
           .from("holdings")
           .insert({
@@ -445,14 +542,14 @@ export default function AccountHoldings() {
         holdingId = inserted.id;
       }
 
-      // 3) On enregistre le mouvement d'achat pour l'historique
+      // 2) Mouvement BUY
       if (holdingId) {
         const amount = quantity * buyPrice;
         const { error: movError } = await supabase.from("movements").insert({
           user_id: user.id,
           account_id: account.id,
           holding_id: holdingId,
-          type: "BUY", // doit exister dans ton enum movement_type
+          type: "BUY",
           amount,
           unit_price: buyPrice,
           quantity,
@@ -461,12 +558,10 @@ export default function AccountHoldings() {
         });
 
         if (movError) {
-          console.error("Erreur lors de la création du mouvement :", movError);
-          // on ne bloque pas l'UX pour ça
+          console.error("Erreur mouvement BUY :", movError);
         }
       }
 
-      // 4) On recharge les holdings + on ferme le formulaire
       await fetchAccountAndHoldings(user.id, account.id);
       setShowForm(false);
       resetForm();
@@ -479,7 +574,6 @@ export default function AccountHoldings() {
   };
 
   // ----------- VENTE d’un placement ----------- //
-
   const openSellModal = (holding) => {
     setSellModalHolding(holding);
     setSellForm({ quantityToSell: "" });
@@ -496,7 +590,7 @@ export default function AccountHoldings() {
     if (!user || !account || !sellModalHolding) return;
 
     const qtyToSell = sellForm.quantityToSell
-      ? parseFloat(sellForm.quantityToSell.replace(",", "."))
+      ? parseFloat(String(sellForm.quantityToSell).replace(",", "."))
       : 0;
 
     if (!qtyToSell) {
@@ -520,7 +614,6 @@ export default function AccountHoldings() {
         sellModalHolding.instrument?.symbol ||
         "Placement";
 
-      // Prix utilisé pour la vente : cours actuel s'il existe, sinon PRU
       const sellPricePerUnit =
         sellModalHolding.current_price != null
           ? Number(sellModalHolding.current_price)
@@ -529,7 +622,6 @@ export default function AccountHoldings() {
       const newQty = currentQty - qtyToSell;
 
       if (newQty <= 0) {
-        // On n'a plus de titres -> on supprime la ligne de holdings
         const { error: delError } = await supabase
           .from("holdings")
           .delete()
@@ -537,12 +629,10 @@ export default function AccountHoldings() {
 
         if (delError) throw delError;
       } else {
-        // On met à jour la quantité restante
         const { error: updError } = await supabase
           .from("holdings")
           .update({
             quantity: newQty,
-            // On garde le même PRU
             current_price: sellPricePerUnit,
             current_value: newQty * sellPricePerUnit,
           })
@@ -551,7 +641,6 @@ export default function AccountHoldings() {
         if (updError) throw updError;
       }
 
-      // On enregistre le mouvement de VENTE dans l'historique
       const amount = qtyToSell * sellPricePerUnit;
 
       const { error: movError } = await supabase.from("movements").insert({
@@ -567,10 +656,7 @@ export default function AccountHoldings() {
       });
 
       if (movError) {
-        console.error(
-          "Erreur lors de l'enregistrement du mouvement SELL :",
-          movError
-        );
+        console.error("Erreur mouvement SELL :", movError);
       }
 
       await fetchAccountAndHoldings(user.id, account.id);
@@ -590,7 +676,7 @@ export default function AccountHoldings() {
     navigate("/");
   };
 
-  // valeur du compte = somme (quantité * PRU) pour l'instant
+  // valeur du compte = somme (quantité * PRU)
   const totalAccountValue = useMemo(() => {
     if (!holdings || holdings.length === 0) return 0;
     return holdings.reduce((sum, h) => {
@@ -645,6 +731,12 @@ export default function AccountHoldings() {
             icon={SlidersHorizontal}
             label="Simulation"
             onClick={() => navigate("/simulation")}
+          />
+          {/* ✅ Bouton Assistant IA ajouté */}
+          <SidebarItem
+            icon={Bot}
+            label="Assistant IA"
+            onClick={() => navigate("/assistant")}
           />
         </nav>
 
@@ -710,7 +802,7 @@ export default function AccountHoldings() {
           {/* Infos compte */}
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 flex flex-col gap-1">
             <p className="text-xs uppercase tracking-wide text-gray-400">
-              Compte d'investissement
+              {isCryptoAccount ? "Compte crypto" : "Compte d'investissement"}
             </p>
             <h1 className="text-lg font-semibold text-gray-900">
               Placements du compte : {account?.name || "—"}
@@ -726,9 +818,9 @@ export default function AccountHoldings() {
               </span>
             </p>
             <p className="text-xs text-gray-400 mt-1">
-              Ici tu peux ajouter les actions, ETF, cryptos… détenus sur ce
-              compte. Plus tard, ces lignes pourront être synchronisées avec les
-              API boursières.
+              {isCryptoAccount
+                ? "Sur un compte crypto, les suggestions viennent de CoinGecko (cryptomonnaies natives)."
+                : "Sur un compte investissement, les suggestions viennent de Finnhub (actions/ETF) avec fallback EODHD."}
             </p>
           </div>
 
@@ -758,8 +850,8 @@ export default function AccountHoldings() {
               </div>
             ) : holdings.length === 0 ? (
               <div className="px-4 py-6 text-sm text-gray-500">
-                Aucun placement pour ce compte pour le moment. Ajoute ton
-                premier titre avec le bouton{" "}
+                Aucun placement pour ce compte pour le moment. Ajoute ton premier
+                titre avec le bouton{" "}
                 <span className="font-semibold">“Nouveau placement”</span>.
               </div>
             ) : (
@@ -772,6 +864,7 @@ export default function AccountHoldings() {
                   <div className="w-2/12 text-right">Valeur</div>
                   <div className="w-[80px] text-right">Actions</div>
                 </div>
+
                 {holdings.map((h, index) => {
                   const label =
                     h.instrument?.name || h.instrument?.symbol || "Placement";
@@ -779,9 +872,7 @@ export default function AccountHoldings() {
                   const qty = Number(h.quantity ?? 0);
                   const avgPrice = Number(h.avg_buy_price ?? 0);
                   const currentPrice =
-                    h.current_price != null
-                      ? Number(h.current_price)
-                      : avgPrice; // fallback PRU
+                    h.current_price != null ? Number(h.current_price) : avgPrice;
                   const value = qty * currentPrice;
 
                   return (
@@ -803,7 +894,9 @@ export default function AccountHoldings() {
                           </span>
                         )}
                       </div>
+
                       <div className="w-2/12 text-right text-gray-800">{qty}</div>
+
                       <div className="w-2/12 text-right text-gray-800">
                         {avgPrice.toLocaleString("fr-FR", {
                           minimumFractionDigits: 2,
@@ -811,6 +904,7 @@ export default function AccountHoldings() {
                         })}{" "}
                         €
                       </div>
+
                       <div className="w-2/12 text-right text-gray-800">
                         {currentPrice.toLocaleString("fr-FR", {
                           minimumFractionDigits: 2,
@@ -818,6 +912,7 @@ export default function AccountHoldings() {
                         })}{" "}
                         €
                       </div>
+
                       <div className="w-2/12 text-right font-semibold text-gray-900">
                         {value.toLocaleString("fr-FR", {
                           minimumFractionDigits: 2,
@@ -825,6 +920,7 @@ export default function AccountHoldings() {
                         })}{" "}
                         €
                       </div>
+
                       <div className="w-[80px] flex justify-end">
                         <button
                           onClick={() => openSellModal(h)}
@@ -868,9 +964,9 @@ export default function AccountHoldings() {
                       Nouveau placement
                     </h2>
                     <p className="text-xs text-gray-500 mt-1">
-                      Commence à taper un symbole ou un nom, on te proposera des
-                      résultats via l&apos;API, et le prix unitaire pourra être
-                      rempli automatiquement.
+                      {isCryptoAccount
+                        ? "Compte crypto : tape un nom ou symbole (ex: BTC, Ethereum) → CoinGecko."
+                        : "Compte investissement : tape un symbole ou nom → Finnhub (fallback EODHD)."}
                     </p>
                   </div>
                   <button
@@ -896,14 +992,16 @@ export default function AccountHoldings() {
                       value={form.label}
                       onChange={handleFormChange}
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60 focus:border-[#D4AF37]"
-                      placeholder="Ex : ETF MSCI World"
+                      placeholder={
+                        isCryptoAccount ? "Ex : Bitcoin" : "Ex : ETF MSCI World"
+                      }
                     />
                   </div>
 
                   {/* Symbole + suggestions */}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700">
-                      Symbole (ticker)
+                      {isCryptoAccount ? "Symbole / recherche crypto" : "Symbole (ticker)"}
                     </label>
                     <input
                       type="text"
@@ -911,49 +1009,61 @@ export default function AccountHoldings() {
                       value={form.symbol}
                       onChange={handleFormChange}
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60 focus:border-[#D4AF37]"
-                      placeholder='Ex : AAPL, CW8.PA... ou "Apple"'
+                      placeholder={
+                        isCryptoAccount
+                          ? 'Ex : BTC, ETH... ou "Ethereum"'
+                          : 'Ex : AAPL, CW8.PA... ou "Apple"'
+                      }
                     />
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      Tu peux taper soit un symbole (AAPL, CW8.PA...), soit un
-                      nom (&quot;Apple&quot;, &quot;S&amp;P 500&quot;). Les deux
-                      déclenchent les suggestions.
-                    </p>
 
-                    {FINNHUB_API_KEY ? (
-                      <>
-                        {searchLoading && (
-                          <p className="text-[10px] text-gray-500 mt-1">
-                            Recherche en cours...
-                          </p>
-                        )}
-                        {searchError && (
-                          <p className="text-[10px] text-red-500 mt-1">
-                            {searchError}
-                          </p>
-                        )}
-                        {searchResults.length > 0 && (
-                          <div className="mt-1 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-sm text-xs">
-                            {searchResults.slice(0, 8).map((item) => (
-                              <button
-                                type="button"
-                                key={`${item.symbol}-${item.description}`}
-                                onClick={() => handlePickSuggestion(item)}
-                                className="w-full text-left px-3 py-1.5 hover:bg-gray-50"
-                              >
-                                <span className="font-medium">
-                                  {item.symbol}
+                    {searchLoading && (
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Recherche en cours...
+                      </p>
+                    )}
+                    {searchError && (
+                      <p className="text-[10px] text-red-500 mt-1">
+                        {searchError}
+                      </p>
+                    )}
+
+                    {searchResults.length > 0 && (
+                      <div className="mt-1 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-sm text-xs">
+                        {searchResults.slice(0, 8).map((item) => {
+                          const key = `${item.source || "finnhub"}-${
+                            item.id || item.symbol
+                          }-${item.description || ""}`;
+
+                          const left = item.symbol || "";
+                          const right = item.description || "";
+
+                          return (
+                            <button
+                              type="button"
+                              key={key}
+                              onClick={() => handlePickSuggestion(item)}
+                              className="w-full text-left px-3 py-1.5 hover:bg-gray-50"
+                            >
+                              <span className="font-medium">{left}</span>
+                              {right && (
+                                <span className="text-gray-500 ml-1">
+                                  — {right}
+                                  {item.source === "coingecko" &&
+                                    item.market_cap_rank && (
+                                      <span className="text-gray-400">
+                                        {" "}
+                                        (rank {item.market_cap_rank})
+                                      </span>
+                                    )}
                                 </span>
-                                {item.description && (
-                                  <span className="text-gray-500 ml-1">
-                                    — {item.description}
-                                  </span>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    ) : (
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {!isCryptoAccount && !FINNHUB_API_KEY && (
                       <p className="text-[10px] text-red-500 mt-1">
                         Clé Finnhub manquante : aucun remplissage automatique
                         possible.
@@ -974,7 +1084,7 @@ export default function AccountHoldings() {
                         value={form.quantity}
                         onChange={handleFormChange}
                         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60 focus:border-[#D4AF37]"
-                        placeholder="Ex : 10"
+                        placeholder="Ex : 0.25"
                       />
                     </div>
                     <div className="space-y-1">
@@ -1069,7 +1179,7 @@ export default function AccountHoldings() {
                       value={sellForm.quantityToSell}
                       onChange={handleSellChange}
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60 focus:border-[#D4AF37]"
-                      placeholder="Ex : 2"
+                      placeholder="Ex : 0.05"
                     />
                   </div>
 
