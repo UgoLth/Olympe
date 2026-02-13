@@ -9,6 +9,7 @@ import {
   LogOut,
   Home,
   SlidersHorizontal,
+  Bot,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -662,6 +663,8 @@ export default function Simulation() {
           <SidebarItem icon={PieChart} label="Portefeuille" onClick={() => navigate("/portefeuille")} />
           <SidebarItem icon={GraduationCap} label="Glossaire" onClick={() => navigate("/glossaire")} />
           <SidebarItem icon={SlidersHorizontal} label="Simulation" active onClick={() => navigate("/simulation")} />
+          <SidebarItem icon={Bot} label="Assistant IA" onClick={() => navigate("/assistant")} />
+
         </nav>
 
         <div className="mt-auto px-4 pb-4 space-y-2">

@@ -10,6 +10,7 @@ import AccountHoldings from "./pages/AccountHoldings";
 import Portfolio from "./pages/Portfolio";
 import Analyse from "./pages/Analyse";
 import Simulation from "./pages/Simulation";
+import AssistantIA from "./pages/AssistantIA";
 
 function App() {
   return (
@@ -37,6 +38,8 @@ function App() {
         <Route path="/analyse" element={<Analyse />} />
 
         <Route path="/simulation" element={<Simulation />} />
+
+        <Route path="/assistant" element={<AssistantIA />} />
 
 
 

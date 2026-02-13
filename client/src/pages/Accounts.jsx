@@ -13,6 +13,7 @@ import {
   Edit3,
   Trash2,
   SlidersHorizontal,
+  Bot,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
@@ -262,6 +263,12 @@ export default function Accounts() {
             icon={SlidersHorizontal}
             label="Simulation"
             onClick={() => navigate("/simulation")}
+          />
+          {/* ✅ Bouton Assistant IA ajouté comme dans le Dashboard */}
+          <SidebarItem
+            icon={Bot}
+            label="Assistant IA"
+            onClick={() => navigate("/assistant")}
           />
         </nav>
 

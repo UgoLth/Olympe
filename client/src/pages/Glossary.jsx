@@ -13,6 +13,7 @@ import {
   Info,
   ChevronDown,
   SlidersHorizontal,
+  Bot,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -1216,6 +1217,8 @@ export default function Glossary() {
             label="Simulation"
             onClick={() => navigate("/simulation")}
           />
+          <SidebarItem icon={Bot} label="Assistant IA" onClick={() => navigate("/assistant")} />
+
         </nav>
 
         {/* Bottom */}

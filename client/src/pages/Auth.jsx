@@ -11,9 +11,14 @@ export default function Auth() {
   const [mode, setMode] = useState("login"); // "login" ou "register"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(false); // pour le login uniquement
+  const [confirmPassword, setConfirmPassword] = useState(""); // ✅ nouveau
+  const [remember, setRemember] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // ✅ Règles : 12+ caractères, 1 maj, 1 min, 1 chiffre, 1 spécial
+  const passwordRegex =
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,15 +26,25 @@ export default function Auth() {
     setLoading(true);
 
     try {
+      // ✅ validations uniquement en register
+      if (mode === "register") {
+        if (password !== confirmPassword) {
+          throw new Error("Les mots de passe ne correspondent pas.");
+        }
+        if (!passwordRegex.test(password)) {
+          throw new Error(
+            "Mot de passe invalide : minimum 12 caractères avec 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial."
+          );
+        }
+      }
+
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-
         if (error) throw error;
 
-        // gestion "Se souvenir de moi"
         if (remember) {
           localStorage.setItem("olympe_remember_me", "1");
         } else {
@@ -54,14 +69,14 @@ export default function Auth() {
         });
         if (loginError) throw loginError;
 
-        // 3️⃣ On considère qu'un nouveau compte est "remember me" par défaut
+        // 3️⃣ remember me par défaut
         localStorage.setItem("olympe_remember_me", "1");
 
-        // 4️⃣ Redirection vers le dashboard
+        // 4️⃣ Redirection
         navigate("/dashboard");
       }
     } catch (err) {
-      setErrorMsg(err.message);
+      setErrorMsg(err?.message || "Une erreur est survenue.");
     } finally {
       setLoading(false);
     }
@@ -104,6 +119,7 @@ export default function Auth() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    autoComplete="email"
                   />
                 </div>
 
@@ -116,8 +132,35 @@ export default function Auth() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    autoComplete={
+                      mode === "login" ? "current-password" : "new-password"
+                    }
                   />
                 </div>
+
+                {/* ✅ Champ confirmation uniquement en register */}
+                {mode === "register" && (
+                  <div>
+                    <label className="text-sm mb-1 block">
+                      Confirmer le mot de passe
+                    </label>
+                    <input
+                      type="password"
+                      className="w-full bg-[#0f1013] border border-white/5 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#d4af37] transition"
+                      placeholder="••••••••"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      autoComplete="new-password"
+                    />
+
+                    {/* petit rappel des règles (optionnel mais utile) */}
+                    <p className="text-[11px] text-white/45 mt-2 leading-snug">
+                      Minimum 12 caractères avec 1 majuscule, 1 minuscule, 1
+                      chiffre et 1 caractère spécial.
+                    </p>
+                  </div>
+                )}
 
                 {/* Options spécifiques au mode login */}
                 {mode === "login" && (
@@ -150,7 +193,7 @@ export default function Auth() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-[#d4af37] hover:bg-[#c39e30] text-black font-medium py-2 rounded-lg transition mt-2"
+                  className="w-full bg-[#d4af37] hover:bg-[#c39e30] text-black font-medium py-2 rounded-lg transition mt-2 disabled:opacity-60"
                 >
                   {loading
                     ? mode === "login"
@@ -169,7 +212,12 @@ export default function Auth() {
                     Nouveau sur Olympe ?{" "}
                     <button
                       type="button"
-                      onClick={() => setMode("register")}
+                      onClick={() => {
+                        setMode("register");
+                        setErrorMsg("");
+                        setPassword("");
+                        setConfirmPassword("");
+                      }}
                       className="text-[#d4af37]"
                     >
                       Crée un compte
@@ -180,7 +228,12 @@ export default function Auth() {
                     Déjà un compte ?{" "}
                     <button
                       type="button"
-                      onClick={() => setMode("login")}
+                      onClick={() => {
+                        setMode("login");
+                        setErrorMsg("");
+                        setPassword("");
+                        setConfirmPassword("");
+                      }}
                       className="text-[#d4af37]"
                     >
                       Se connecter
