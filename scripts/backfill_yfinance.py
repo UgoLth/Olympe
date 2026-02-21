@@ -5,6 +5,7 @@ from datetime import datetime
 import yfinance as yf
 from supabase import create_client, Client
 
+
 # ------------------ CONFIG ------------------ #
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -115,6 +116,11 @@ def backfill_symbol(symbol: str):
         print(f"  Aucune donnée retournée par yfinance pour {symbol}")
         return
 
+    # ⚠️ Certains tickers peuvent renvoyer des colonnes MultiIndex.
+    # On force un format "plat" si besoin.
+    if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+        df.columns = [" ".join([str(x) for x in col if x]).strip() for col in df.columns.values]
+
     print(f"  {len(df)} lignes reçues depuis yfinance.")
 
     rows_to_upsert = []
@@ -125,14 +131,29 @@ def backfill_symbol(symbol: str):
         else:
             date_str = str(index)[:10]
 
+        # --------- récupération du prix (robuste) ---------
         price = None
-        if "Adj Close" in row and row["Adj Close"] is not None:
-            price = float(row["Adj Close"])
-        elif "Close" in row and row["Close"] is not None:
-            price = float(row["Close"])
+        try:
+            if "Adj Close" in df.columns:
+                value = row["Adj Close"]
+            elif "Close" in df.columns:
+                value = row["Close"]
+            else:
+                # cas rare : colonnes avec nom différent
+                continue
+
+            # Si yfinance renvoie une Series au lieu d'un scalaire
+            if hasattr(value, "iloc"):
+                value = value.iloc[0]
+
+            if value is not None:
+                price = float(value)
+        except Exception:
+            continue
 
         if price is None or price <= 0:
             continue
+        # -----------------------------------------------
 
         # On fixe toujours 00:00:00Z pour le jour
         fetched_at = datetime.strptime(date_str, "%Y-%m-%d").isoformat() + "Z"
@@ -157,7 +178,7 @@ def backfill_symbol(symbol: str):
     processed_total = 0
 
     for i in range(0, len(rows_to_upsert), batch_size):
-        chunk = rows_to_upsert[i : i + batch_size]
+        chunk = rows_to_upsert[i: i + batch_size]
         print(f"  → Upsert chunk {i} - {i + len(chunk)}...")
 
         res = (
@@ -172,7 +193,9 @@ def backfill_symbol(symbol: str):
 
         processed_total += len(chunk)
 
-    print(f"✅ Backfill terminé pour {symbol} : {processed_total} lignes traitées (doublons ignorés).")
+    print(
+        f"✅ Backfill terminé pour {symbol} : {processed_total} lignes traitées (doublons ignorés)."
+    )
 
 
 # ------------------ MAIN ------------------ #
