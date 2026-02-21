@@ -95,32 +95,6 @@ def get_or_create_instrument(symbol: str) -> str:
     return instrument_id
 
 
-def get_existing_dates_for_instrument(instrument_id: str) -> Set[str]:
-    """
-    Récupère les dates déjà présentes dans asset_prices pour cet instrument,
-    pour éviter les doublons si tu relances le script.
-    On stocke les dates au format 'YYYY-MM-DD'.
-    """
-    print(f"→ Lecture des dates existantes pour instrument {instrument_id}")
-    res = (
-        supabase.table("asset_prices")
-        .select("fetched_at")
-        .eq("instrument_id", instrument_id)
-        .execute()
-    )
-
-    existing: Set[str] = set()
-    if res.data:
-        for row in res.data:
-            fetched_at = row.get("fetched_at")
-            if fetched_at:
-                date_str = fetched_at[:10]
-                existing.add(date_str)
-
-    print(f"  {len(existing)} dates déjà présentes en base.")
-    return existing
-
-
 # ------------------ BACKFILL ------------------ #
 
 def backfill_symbol(symbol: str):
@@ -128,12 +102,11 @@ def backfill_symbol(symbol: str):
     Backfill complet d'un symbole :
     - récupère / crée instrument
     - télécharge l'historique yfinance
-    - insère les lignes manquantes dans asset_prices
+    - UPSERT dans asset_prices (doublons gérés par la DB via UNIQUE)
     """
     print(f"\n========== BACKFILL {symbol} ==========")
 
     instrument_id = get_or_create_instrument(symbol)
-    existing_dates = get_existing_dates_for_instrument(instrument_id)
 
     print(f"→ Téléchargement historique yfinance pour {symbol}...")
     df = yf.download(symbol, period="max", interval="1d", auto_adjust=False)
@@ -144,7 +117,7 @@ def backfill_symbol(symbol: str):
 
     print(f"  {len(df)} lignes reçues depuis yfinance.")
 
-    rows_to_insert = []
+    rows_to_upsert = []
 
     for index, row in df.iterrows():
         if isinstance(index, datetime):
@@ -152,32 +125,19 @@ def backfill_symbol(symbol: str):
         else:
             date_str = str(index)[:10]
 
-        # Si on a déjà un prix pour ce jour-là → on skip
-        if date_str in existing_dates:
-            continue
-
         price = None
-
         if "Adj Close" in row and row["Adj Close"] is not None:
-            val = row["Adj Close"]
-            # ✅ Correction: si val est une Series, on prend la première valeur
-            if hasattr(val, "iloc"):
-                val = val.iloc[0]
-            price = float(val)
-
+            price = float(row["Adj Close"])
         elif "Close" in row and row["Close"] is not None:
-            val = row["Close"]
-            # ✅ Correction: si val est une Series, on prend la première valeur
-            if hasattr(val, "iloc"):
-                val = val.iloc[0]
-            price = float(val)
+            price = float(row["Close"])
 
         if price is None or price <= 0:
             continue
 
+        # On fixe toujours 00:00:00Z pour le jour
         fetched_at = datetime.strptime(date_str, "%Y-%m-%d").isoformat() + "Z"
 
-        rows_to_insert.append(
+        rows_to_upsert.append(
             {
                 "instrument_id": instrument_id,
                 "price": price,
@@ -187,27 +147,32 @@ def backfill_symbol(symbol: str):
             }
         )
 
-    print(f"  {len(rows_to_insert)} nouvelles lignes à insérer dans asset_prices.")
+    print(f"  {len(rows_to_upsert)} lignes (tentatives) à upsert dans asset_prices.")
 
-    if not rows_to_insert:
-        print("  Rien à insérer (tout est déjà en base).")
+    if not rows_to_upsert:
+        print("  Rien à insérer.")
         return
 
     batch_size = 500
-    inserted_total = 0
+    processed_total = 0
 
-    for i in range(0, len(rows_to_insert), batch_size):
-        chunk = rows_to_insert[i : i + batch_size]
-        print(f"  → Insertion chunk {i} - {i + len(chunk)}...")
-        res = supabase.table("asset_prices").insert(chunk).execute()
+    for i in range(0, len(rows_to_upsert), batch_size):
+        chunk = rows_to_upsert[i : i + batch_size]
+        print(f"  → Upsert chunk {i} - {i + len(chunk)}...")
+
+        res = (
+            supabase.table("asset_prices")
+            .upsert(chunk, on_conflict="instrument_id,fetched_at")
+            .execute()
+        )
 
         if getattr(res, "error", None):
-            print("    Erreur d'insertion Supabase:", res.error)
-            raise RuntimeError(resp.error)
+            print("    Erreur Supabase:", res.error)
+            raise RuntimeError(res.error)
 
-        inserted_total += len(chunk)
+        processed_total += len(chunk)
 
-    print(f"✅ Backfill terminé pour {symbol} : {inserted_total} lignes insérées.")
+    print(f"✅ Backfill terminé pour {symbol} : {processed_total} lignes traitées (doublons ignorés).")
 
 
 # ------------------ MAIN ------------------ #
