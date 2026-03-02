@@ -12,18 +12,14 @@ import {
   ArrowLeft,
   Plus,
   SlidersHorizontal,
-  Bot, 
+  Bot,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 
-
 const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_KEY;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-/**
- * Helper : récupère le prix depuis l’Edge Function EODHD
- */
 async function fetchEodhdPrice(symbol) {
   if (!SUPABASE_URL) {
     console.error("VITE_SUPABASE_URL manquante");
@@ -64,14 +60,9 @@ async function fetchEodhdPrice(symbol) {
   }
 }
 
-/**
- * CoinGecko helpers (GRATUIT, pas de clé requise)
- * - Search : renvoie des coins (id, name, symbol)
- * - Price : renvoie prix EUR
- */
 async function coingeckoSearch(query) {
   try {
-    const url = `https:
+    const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(
       query
     )}`;
     const res = await fetch(url);
@@ -82,8 +73,8 @@ async function coingeckoSearch(query) {
     return coins.slice(0, 8).map((c) => ({
       source: "coingecko",
       id: c.id, 
-      symbol: String(c.symbol || "").toUpperCase(), 
-      description: c.name || c.id, 
+      symbol: String(c.symbol || "").toUpperCase(),
+      description: c.name || c.id,
       type: "crypto",
       market_cap_rank: c.market_cap_rank ?? null,
     }));
@@ -95,7 +86,7 @@ async function coingeckoSearch(query) {
 
 async function coingeckoPriceEUR(coingeckoId) {
   try {
-    const url = `https:
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
       coingeckoId
     )}&vs_currencies=eur`;
     const res = await fetch(url);
@@ -129,35 +120,31 @@ export default function AccountHoldings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     label: "",
     symbol: "",
     quantity: "",
     buyPrice: "",
-    instrumentId: null, 
+    instrumentId: null,
   });
 
-  
+
   const [sellModalHolding, setSellModalHolding] = useState(null);
   const [sellForm, setSellForm] = useState({
     quantityToSell: "",
   });
 
-  
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
 
-  
   const isCryptoAccount = useMemo(() => {
     const p = String(account?.product || "").toLowerCase();
     const t = String(account?.type || "").toLowerCase();
     return p.includes("crypto") || t === "crypto";
   }, [account]);
 
-  
   useEffect(() => {
     const init = async () => {
       const { data, error } = await supabase.auth.getUser();
@@ -178,7 +165,6 @@ export default function AccountHoldings() {
     setLoading(true);
     setError("");
 
-    
     const { data: accountData, error: accError } = await supabase
       .from("accounts")
       .select("*")
@@ -195,7 +181,6 @@ export default function AccountHoldings() {
 
     setAccount(accountData);
 
-    
     const { data: holdingsData, error: holdError } = await supabase
       .from("holdings")
       .select(
@@ -224,7 +209,6 @@ export default function AccountHoldings() {
     setLoading(false);
   };
 
-  
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -242,7 +226,6 @@ export default function AccountHoldings() {
     setSearchError("");
   };
 
-  
   useEffect(() => {
     let query = form.symbol.trim();
     if (!query) query = form.label.trim();
@@ -260,14 +243,13 @@ export default function AccountHoldings() {
       setSearchError("");
 
       try {
-        
+
         if (isCryptoAccount) {
           const results = await coingeckoSearch(query);
           if (!cancelled) setSearchResults(results);
           return;
         }
 
-        
         if (!FINNHUB_API_KEY) {
           if (!cancelled) {
             setSearchResults([]);
@@ -276,7 +258,7 @@ export default function AccountHoldings() {
           return;
         }
 
-        const url = `https:
+        const url = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(
           query
         )}&token=${FINNHUB_API_KEY}`;
 
@@ -310,7 +292,6 @@ export default function AccountHoldings() {
     };
   }, [form.symbol, form.label, isCryptoAccount]);
 
-  
   const handlePickSuggestion = async (item) => {
     const isCoinGecko = item?.source === "coingecko";
     const pickedSymbol = isCoinGecko
@@ -321,7 +302,6 @@ export default function AccountHoldings() {
       ? item.description || pickedSymbol
       : item.description || item.symbol || "";
 
-    
     setForm((prev) => ({
       ...prev,
       symbol: pickedSymbol,
@@ -331,10 +311,8 @@ export default function AccountHoldings() {
     setSearchResults([]);
     setSearchError("");
 
-    
     if (!pickedSymbol) return;
 
-    
     if (isCryptoAccount && !isCoinGecko) {
       setError(
         "Ce compte est un compte crypto : sélectionne une cryptomonnaie (CoinGecko), pas un ETF/action."
@@ -342,8 +320,6 @@ export default function AccountHoldings() {
       return;
     }
 
-    
-    
     const exchangeKey = isCoinGecko && item.id ? `coingecko:${item.id}` : null;
 
     let instrumentId = null;
@@ -351,7 +327,6 @@ export default function AccountHoldings() {
       let q = supabase.from("instruments").select("id, symbol, exchange");
 
       if (isCoinGecko && exchangeKey) {
-        
         q = q.eq("exchange", exchangeKey);
       } else {
         q = q.eq("symbol", pickedSymbol);
@@ -390,17 +365,14 @@ export default function AccountHoldings() {
       setForm((prev) => ({ ...prev, instrumentId }));
     }
 
-    
     let price = null;
 
-    
     if (isCoinGecko && item.id) {
       price = await coingeckoPriceEUR(item.id);
     } else {
-      
       if (FINNHUB_API_KEY && pickedSymbol) {
         try {
-          const url = `https:
+          const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
             pickedSymbol
           )}&token=${FINNHUB_API_KEY}`;
 
@@ -425,7 +397,6 @@ export default function AccountHoldings() {
         }
       }
 
-      
       if (!price && pickedSymbol) {
         const eodPrice = await fetchEodhdPrice(pickedSymbol);
         console.log("Prix EODHD pour", pickedSymbol, eodPrice);
@@ -439,7 +410,6 @@ export default function AccountHoldings() {
       }
     }
 
-    
     if (price) {
       setForm((prev) => ({
         ...prev,
@@ -448,7 +418,6 @@ export default function AccountHoldings() {
     }
   };
 
-  
   const handleCreateHolding = async (e) => {
     e.preventDefault();
     if (!user || !account) return;
@@ -479,7 +448,7 @@ export default function AccountHoldings() {
     setError("");
 
     try {
-      
+
       const { data: existingRows, error: existingError } = await supabase
         .from("holdings")
         .select("*")
@@ -496,7 +465,6 @@ export default function AccountHoldings() {
       let holdingId = null;
 
       if (existingHolding) {
-        
         const oldQty = Number(existingHolding.quantity ?? 0);
         const oldPru = Number(existingHolding.avg_buy_price ?? 0);
         const newQty = oldQty + quantity;
@@ -522,7 +490,7 @@ export default function AccountHoldings() {
         if (updateError) throw updateError;
         holdingId = updated.id;
       } else {
-        
+        // Nouveau holding
         const { data: inserted, error: insertHoldError } = await supabase
           .from("holdings")
           .insert({
@@ -542,7 +510,6 @@ export default function AccountHoldings() {
         holdingId = inserted.id;
       }
 
-      
       if (holdingId) {
         const amount = quantity * buyPrice;
         const { error: movError } = await supabase.from("movements").insert({
@@ -573,7 +540,6 @@ export default function AccountHoldings() {
     }
   };
 
-  
   const openSellModal = (holding) => {
     setSellModalHolding(holding);
     setSellForm({ quantityToSell: "" });
@@ -676,7 +642,6 @@ export default function AccountHoldings() {
     navigate("/");
   };
 
-  
   const totalAccountValue = useMemo(() => {
     if (!holdings || holdings.length === 0) return 0;
     return holdings.reduce((sum, h) => {
@@ -686,10 +651,9 @@ export default function AccountHoldings() {
     }, 0);
   }, [holdings]);
 
-  
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      
+      {/* SIDEBAR */}
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
@@ -732,7 +696,6 @@ export default function AccountHoldings() {
             label="Simulation"
             onClick={() => navigate("/simulation")}
           />
-          
           <SidebarItem
             icon={Bot}
             label="Assistant IA"
@@ -759,9 +722,8 @@ export default function AccountHoldings() {
         </div>
       </aside>
 
-      
       <main className="flex-1 flex flex-col overflow-hidden">
-        
+
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
             <button
@@ -797,9 +759,8 @@ export default function AccountHoldings() {
           </div>
         </header>
 
-        
         <div className="flex-1 p-6 overflow-y-auto space-y-4">
-          
+          {/* Infos compte */}
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 flex flex-col gap-1">
             <p className="text-xs uppercase tracking-wide text-gray-400">
               {isCryptoAccount ? "Compte crypto" : "Compte d'investissement"}
@@ -824,7 +785,6 @@ export default function AccountHoldings() {
             </p>
           </div>
 
-          
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <p className="text-sm font-medium text-gray-800">
@@ -943,7 +903,6 @@ export default function AccountHoldings() {
           )}
         </div>
 
-        
         <AnimatePresence>
           {showForm && (
             <motion.div
@@ -981,7 +940,6 @@ export default function AccountHoldings() {
                 </div>
 
                 <form onSubmit={handleCreateHolding} className="space-y-3">
-                  
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700">
                       Libellé / nom du placement
@@ -998,7 +956,6 @@ export default function AccountHoldings() {
                     />
                   </div>
 
-                  
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-700">
                       {isCryptoAccount ? "Symbole / recherche crypto" : "Symbole (ticker)"}
@@ -1071,7 +1028,6 @@ export default function AccountHoldings() {
                     )}
                   </div>
 
-                  
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-gray-700">
@@ -1130,7 +1086,6 @@ export default function AccountHoldings() {
           )}
         </AnimatePresence>
 
-        
         <AnimatePresence>
           {sellModalHolding && (
             <motion.div
@@ -1228,7 +1183,6 @@ export default function AccountHoldings() {
     </div>
   );
 }
-
 
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
