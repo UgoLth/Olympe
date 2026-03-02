@@ -1,4 +1,4 @@
-// src/pages/Dashboard.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -15,7 +15,7 @@ import {
   Target,
   TrendingUp,
   ListChecks,
-  Bot, // ✅ nouveau: icône pour la page IA dans le menu
+  Bot, 
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
@@ -35,7 +35,7 @@ const formatPct1 = (v) => {
   return `${s}${(Math.round(x * 10) / 10).toFixed(1)} %`;
 };
 
-// % entre prix courant et prix de référence
+
 const computeReturnPct = (current, reference) => {
   const c = toNumber(current);
   const r = toNumber(reference);
@@ -59,20 +59,20 @@ export default function Dashboard() {
 
   const [loading, setLoading] = useState(true);
 
-  // data
+  
   const [accounts, setAccounts] = useState([]);
   const [holdings, setHoldings] = useState([]);
   const [goals, setGoals] = useState([]);
   const [movements, setMovements] = useState([]);
 
-  // KPIs
+  
   const [summary, setSummary] = useState({
     totalValue: 0,
     dailyChangePct: 0,
     monthChangePct: 0,
   });
 
-  // ---- AUTH ----
+  
   useEffect(() => {
     const init = async () => {
       const { data, error } = await supabase.auth.getUser();
@@ -96,7 +96,7 @@ export default function Dashboard() {
   const loadDashboard = async (uid) => {
     setLoading(true);
     try {
-      // 1) Accounts
+      
       const { data: accountsData, error: accErr } = await supabase
         .from("accounts")
         .select("id, user_id, name, type, currency, initial_amount, current_amount, created_at")
@@ -105,7 +105,7 @@ export default function Dashboard() {
 
       if (accErr) throw accErr;
 
-      // 2) Holdings
+      
       const { data: holdingsData, error: holdErr } = await supabase
         .from("holdings")
         .select("id, user_id, account_id, instrument_id, quantity, avg_buy_price, current_price, current_value, asset_label, created_at")
@@ -113,7 +113,7 @@ export default function Dashboard() {
 
       if (holdErr) throw holdErr;
 
-      // 3) Goals
+      
       const { data: goalsData, error: goalsErr } = await supabase
         .from("investment_goals")
         .select(
@@ -125,11 +125,11 @@ export default function Dashboard() {
 
       if (goalsErr) throw goalsErr;
 
-      // 4) Movements (derniers) ✅ + fallback si RLS/aucune ligne
+      
       const buildFallbackMovements = (accRows, holdRows) => {
         const accNameById = Object.fromEntries((accRows || []).map((a) => [a.id, a.name || "Compte"]));
 
-        // pseudo-mouvements depuis holdings (ajout = achat)
+        
         const fromHoldings = (holdRows || []).map((h) => {
           const qty = toNumber(h.quantity);
           const unit = toNumber(h.avg_buy_price);
@@ -151,7 +151,7 @@ export default function Dashboard() {
           };
         });
 
-        // pseudo-mouvements depuis comptes (versement initial si montant > 0)
+        
         const fromAccounts = (accRows || [])
           .filter((a) => toNumber(a.initial_amount) > 0 || toNumber(a.current_amount) > 0)
           .map((a) => {
@@ -171,7 +171,7 @@ export default function Dashboard() {
 
         const all = [...fromHoldings, ...fromAccounts];
 
-        // tri date desc (occurred_at sinon created_at)
+        
         all.sort((x, y) => {
           const dx = new Date(x.occurred_at || x.created_at || 0).getTime();
           const dy = new Date(y.occurred_at || y.created_at || 0).getTime();
@@ -188,7 +188,7 @@ export default function Dashboard() {
         .order("occurred_at", { ascending: false, nullsFirst: false })
         .limit(6);
 
-      // Si RLS filtre tout (data vide sans erreur), ou erreur => fallback
+      
       let movData = movDataRaw || [];
       if (movErr || movData.length === 0) {
         movData = buildFallbackMovements(accountsData || [], holdingsData || []);
@@ -200,7 +200,7 @@ export default function Dashboard() {
         });
       }
 
-      // ---- Total value (logique proche Analyse) ----
+      
       const accountsWithHoldings = new Set((holdingsData || []).map((h) => h.account_id));
       const standaloneAccounts = (accountsData || []).filter((a) => !accountsWithHoldings.has(a.id));
 
@@ -226,7 +226,7 @@ export default function Dashboard() {
 
       const totalValue = totalHoldingsValue + totalStandaloneValue;
 
-      // ---- Perf J-1 / 30j pondérée sur holdings (asset_prices) ----
+      
       const instrumentIds = Array.from(new Set((holdingsData || []).map((h) => h.instrument_id).filter(Boolean)));
 
       let prev1dByInstrument = {};
@@ -297,7 +297,7 @@ export default function Dashboard() {
         month = Math.round(month * 10) / 10;
       }
 
-      // ---- Account values (avec holdings groupés) ----
+      
       const accountValueMap = {};
       (accountsData || []).forEach((a) => (accountValueMap[a.id] = 0));
 
@@ -309,7 +309,7 @@ export default function Dashboard() {
         accountValueMap[a.id] = (accountValueMap[a.id] || 0) + toNumber(a.current_amount);
       });
 
-      // ---- Goals: current amount dépend du scope (global/account/holding) ----
+      
       const holdingById = Object.fromEntries((holdingsComputed || []).map((h) => [h.id, h]));
       const accountById = Object.fromEntries((accountsData || []).map((a) => [a.id, a]));
 
@@ -353,7 +353,7 @@ export default function Dashboard() {
     }
   };
 
-  // ---- Derived UI ----
+  
   const accountsPreview = useMemo(() => {
     if (!accounts.length) return [];
     const holdingsByAccount = {};
@@ -414,7 +414,7 @@ export default function Dashboard() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">OLYMPE</p>
@@ -450,9 +450,9 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* HEADER */}
+        
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <p className="text-sm text-gray-500">
             {new Date().toLocaleDateString("fr-FR", {
@@ -481,9 +481,9 @@ export default function Dashboard() {
             </div>
           ) : (
             <>
-              {/* ROW 1 — Compact + Accounts */}
+              
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Compact summary */}
+                
                 <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -519,7 +519,7 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  {/* A retenir */}
+                  
                   <div className="mt-4 border-t border-gray-100 pt-4">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp size={16} className="text-gray-700" />
@@ -541,10 +541,10 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* ✅ Assistant IA supprimé */}
+                  
                 </div>
 
-                {/* Accounts preview */}
+                
                 <div className="bg-white rounded-2xl border border-gray-200 p-5">
                   <h2 className="text-sm font-semibold text-gray-800">Aperçu des comptes</h2>
                   <p className="text-xs text-gray-500 mb-3">Vos comptes les plus importants.</p>
@@ -570,9 +570,9 @@ export default function Dashboard() {
                 </div>
               </section>
 
-              {/* ROW 2 — Goals + Movements */}
+              
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Goals */}
+                
                 <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div>
@@ -675,7 +675,7 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Movements */}
+                
                 <div className="bg-white rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-center gap-2 mb-1">
                     <ListChecks size={16} className="text-gray-700" />

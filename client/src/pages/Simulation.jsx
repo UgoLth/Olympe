@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
-// Chart.js
+
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -58,7 +58,7 @@ const formatCurrency0 = (n) =>
 const formatPct1 = (v) =>
   `${(v > 0 ? "+" : v < 0 ? "" : "")}${(Math.round(v * 10) / 10).toFixed(1)} %`;
 
-// --- Simulation simple capital + versements mensuels ---
+
 const simulateScenario = ({ initialCapital, monthlyContribution, years, annualReturnPct }) => {
   const values = [];
   let capital = toNumber(initialCapital);
@@ -74,7 +74,7 @@ const simulateScenario = ({ initialCapital, monthlyContribution, years, annualRe
   return values;
 };
 
-// --- Valeur future simple (capital unique aujourd’hui) ---
+
 const futureValue = (current, annualReturnPct, years) => {
   const c = toNumber(current);
   const r = toNumber(annualReturnPct) / 100;
@@ -83,7 +83,7 @@ const futureValue = (current, annualReturnPct, years) => {
   return c * Math.pow(1 + r, t);
 };
 
-// Montant à investir aujourd’hui pour atteindre une cible
+
 const extraNowForGoal = (currentValue, target, annualReturnPct, years) => {
   const fvCurrent = futureValue(currentValue, annualReturnPct, years);
   const tgt = toNumber(target);
@@ -102,15 +102,15 @@ export default function Simulation() {
   const [userEmail, setUserEmail] = useState("");
   const [userId, setUserId] = useState(null);
 
-  // --- Données portefeuille ---
+  
   const [accounts, setAccounts] = useState([]);
   const [holdings, setHoldings] = useState([]);
   const [instrumentsById, setInstrumentsById] = useState({});
-  const [instrumentReturns, setInstrumentReturns] = useState({}); // % annuel estimé
-  const [accountReturns, setAccountReturns] = useState({}); // rendement auto basé sur répartition actuelle
+  const [instrumentReturns, setInstrumentReturns] = useState({}); 
+  const [accountReturns, setAccountReturns] = useState({}); 
   const [loadingData, setLoadingData] = useState(true);
 
-  // --- Scénarios globaux ---
+  
   const [scenarioA, setScenarioA] = useState({
     name: "Scénario A",
     initialCapital: "",
@@ -127,13 +127,13 @@ export default function Simulation() {
     annualReturnPct: "",
   });
 
-  // Objectif global (basé sur scénario A)
+  
   const [globalGoalTitle, setGlobalGoalTitle] = useState("");
   const [globalGoalTarget, setGlobalGoalTarget] = useState("");
   const [savingGlobalGoal, setSavingGlobalGoal] = useState(false);
   const [globalGoalMessage, setGlobalGoalMessage] = useState("");
 
-  // --- Objectif par ligne ---
+  
   const [selectedHoldingId, setSelectedHoldingId] = useState("");
   const [lineTargetAmount, setLineTargetAmount] = useState("");
   const [lineYears, setLineYears] = useState("");
@@ -141,17 +141,17 @@ export default function Simulation() {
   const [savingLineGoal, setSavingLineGoal] = useState(false);
   const [lineGoalMessage, setLineGoalMessage] = useState("");
 
-  // --- Objectif par compte ---
+  
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [accountTargetAmount, setAccountTargetAmount] = useState("");
   const [accountYears, setAccountYears] = useState("");
   const [accountReturnInput, setAccountReturnInput] = useState("");
-  const [allocationMode, setAllocationMode] = useState("current"); // "current" | "target"
+  const [allocationMode, setAllocationMode] = useState("current"); 
   const [targetWeights, setTargetWeights] = useState({});
   const [savingAccountGoal, setSavingAccountGoal] = useState(false);
   const [accountGoalMessage, setAccountGoalMessage] = useState("");
 
-  // --- AUTH + chargement données ---
+  
   useEffect(() => {
     const init = async () => {
       const { data, error } = await supabase.auth.getUser();
@@ -193,7 +193,7 @@ export default function Simulation() {
       let accountReturnsLocal = {};
 
       if (instrumentIds.length > 0) {
-        // 1) Instruments
+        
         const { data: instruments, error: instErr } = await supabase
           .from("instruments")
           .select("id, symbol, name, asset_class")
@@ -203,7 +203,7 @@ export default function Simulation() {
 
         instrumentsByIdLocal = Object.fromEntries((instruments || []).map((i) => [i.id, i]));
 
-        // 2) Rendements automatiques depuis instrument_returns
+        
         const { data: returnsData, error: retErr } = await supabase
           .from("instrument_returns")
           .select("instrument_id, cagr, period_years")
@@ -213,12 +213,12 @@ export default function Simulation() {
 
         (returnsData || []).forEach((r) => {
           if (r.cagr === null || r.cagr === undefined) return;
-          const pct = Number(r.cagr) * 100; // décimal -> %
+          const pct = Number(r.cagr) * 100; 
           if (!Number.isFinite(pct)) return;
           instrumentReturnsLocal[r.instrument_id] = Math.max(0, pct);
         });
 
-        // 3) Rendement moyen pondéré par compte
+        
         const holdingsByAccount = {};
         (holdingsData || []).forEach((h) => {
           if (!holdingsByAccount[h.account_id]) holdingsByAccount[h.account_id] = [];
@@ -258,7 +258,7 @@ export default function Simulation() {
     }
   };
 
-  // --- Déconnexion auto si pas remember ---
+  
   useEffect(() => {
     const handleBeforeUnload = async () => {
       const remember = localStorage.getItem("olympe_remember_me");
@@ -274,7 +274,7 @@ export default function Simulation() {
     navigate("/");
   };
 
-  // --- MàJ scénarios ---
+  
   const updateScenario = (which, field, value) => {
     const updater = which === "A" ? setScenarioA : setScenarioB;
     updater((prev) => ({ ...prev, [field]: value }));
@@ -371,7 +371,7 @@ export default function Simulation() {
     },
   };
 
-  // ✅ helper pour afficher une erreur Supabase utile
+  
   const explainSupabaseError = (error) => {
     if (!error) return "Erreur inconnue.";
     const parts = [];
@@ -382,7 +382,7 @@ export default function Simulation() {
     return parts.join(" • ");
   };
 
-  // --- Enregistrement objectif global ---
+  
   const handleSaveGlobalGoal = async () => {
     if (!userId) return;
     setSavingGlobalGoal(true);
@@ -390,7 +390,7 @@ export default function Simulation() {
 
     const parsed = parseScenarioForSim(scenarioA);
 
-    // ✅ payload “propre” (pas de NaN / pas de "")
+    
     const payload = {
       user_id: userId,
       title: globalGoalTitle?.trim() || "Objectif global",
@@ -421,7 +421,7 @@ export default function Simulation() {
     }
   };
 
-  // --- Sélecteurs utiles ---
+  
   const holdingsWithMeta = useMemo(
     () =>
       holdings.map((h) => {
@@ -452,7 +452,7 @@ export default function Simulation() {
     return map;
   }, [holdingsWithMeta]);
 
-  // --- Objectif par ligne : calculs ---
+  
   const selectedHolding = holdingsWithMeta.find((h) => String(h.id) === String(selectedHoldingId));
 
   const autoLineReturn =
@@ -492,8 +492,8 @@ export default function Simulation() {
       expected_return_pct: effectiveR,
       horizon_years: toNullableInt(lineYears),
       scope: "line",
-      account_id: selectedHolding.account_id, // uuid OK
-      holding_id: selectedHolding.id, // uuid OK
+      account_id: selectedHolding.account_id, 
+      holding_id: selectedHolding.id, 
       details: {
         type: "single_line",
         instrument_id: selectedHolding.instrument_id,
@@ -523,7 +523,7 @@ export default function Simulation() {
     }
   };
 
-  // --- Objectif par compte : calculs ---
+  
   const selectedAccount = accounts.find((a) => String(a.id) === String(selectedAccountId));
   const accountHoldings = selectedAccount ? holdingsByAccount[selectedAccount.id] || [] : [];
 
@@ -649,7 +649,7 @@ export default function Simulation() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">OLYMPE</p>
@@ -686,9 +686,9 @@ export default function Simulation() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* HEADER */}
+        
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-gray-400">Simulation</p>
@@ -712,7 +712,7 @@ export default function Simulation() {
             </div>
           ) : (
             <>
-              {/* 1️⃣ Scénarios + graph + objectif global */}
+              
               <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <div className="xl:col-span-2 space-y-4">
                   <div className="bg-white rounded-2xl border border-gray-200 p-5">
@@ -859,9 +859,9 @@ export default function Simulation() {
                 </div>
               </section>
 
-              {/* 2️⃣ Objectif sur une ligne & sur un compte */}
+              
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Objectif par ligne */}
+                
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
                   <h2 className="text-sm font-semibold text-gray-800">Objectif sur une ligne</h2>
                   <p className="text-xs text-gray-500">Choisissez un placement existant et un montant cible.</p>
@@ -951,7 +951,7 @@ export default function Simulation() {
                   {lineGoalMessage && <p className="text-[11px] text-gray-500 mt-2">{lineGoalMessage}</p>}
                 </div>
 
-                {/* Objectif par compte */}
+                
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>

@@ -1,4 +1,4 @@
-// src/pages/Accounts.jsx
+﻿
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 
-// ---- Types techniques (enum account_type dans Supabase) ----
+
 const ACCOUNT_TYPES = [
   { value: "cash", label: "Cash / comptes courants" },
   { value: "savings", label: "Épargne (livrets…)" },
@@ -35,7 +35,7 @@ const TYPE_LABELS = {
   other: "Autre",
 };
 
-// ---- Produits disponibles selon le type ----
+
 const PRODUCTS_BY_TYPE = {
   cash: ["Compte courant", "Compte joint", "Compte pro"],
   savings: ["Livret A", "Livret Jeune", "LEP", "LDDS", "PEL", "Autre livret"],
@@ -44,7 +44,7 @@ const PRODUCTS_BY_TYPE = {
   other: ["Autre"],
 };
 
-// Si jamais tu as un ancien compte sans type, on le devine via product
+
 function inferTypeFromProduct(product) {
   if (!product) return null;
   for (const [type, products] of Object.entries(PRODUCTS_BY_TYPE)) {
@@ -75,7 +75,7 @@ export default function Accounts() {
     creationDate: new Date().toISOString().slice(0, 10),
   });
 
-  // ---------------- Vérif utilisateur + chargement
+  
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getUser();
@@ -107,11 +107,11 @@ export default function Accounts() {
     setLoadingAccounts(false);
   };
 
-  // ---------------- Gestion formulaire
+  
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    // Si on change le type → reset du produit
+    
     if (name === "type") {
       setForm((prev) => ({
         ...prev,
@@ -165,13 +165,13 @@ export default function Accounts() {
     setError("");
 
     const initial = form.initialAmount
-      ? parseFloat(form.initialAmount.replace(",", ".")) // au cas où l’utilisateur tape une virgule
+      ? parseFloat(form.initialAmount.replace(",", ".")) 
       : 0;
 
     const payload = {
       user_id: user.id,
       name: form.name.trim(),
-      type: form.type || null, // ✔ enum PostgreSQL propre
+      type: form.type || null, 
       product: form.product || null,
       currency: form.currency,
       initial_amount: initial,
@@ -223,7 +223,7 @@ export default function Accounts() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
@@ -264,7 +264,7 @@ export default function Accounts() {
             label="Simulation"
             onClick={() => navigate("/simulation")}
           />
-          {/* ✅ Bouton Assistant IA ajouté comme dans le Dashboard */}
+          
           <SidebarItem
             icon={Bot}
             label="Assistant IA"
@@ -291,9 +291,9 @@ export default function Accounts() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* TOP BAR */}
+        
         <header className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
           <p className="text-sm text-gray-500">
             {new Date().toLocaleDateString("fr-FR", {
@@ -309,7 +309,7 @@ export default function Accounts() {
           </p>
         </header>
 
-        {/* CONTENT */}
+        
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -336,7 +336,7 @@ export default function Accounts() {
             </div>
           )}
 
-          {/* LISTE DES COMPTES */}
+          
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <p className="font-medium text-gray-800 text-sm">Vos comptes</p>
@@ -398,7 +398,7 @@ export default function Accounts() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* 👉 Bouton pour gérer les placements, seulement pour les comptes invest / retraite */}
+                        
                         {isInvestmentAccount && (
                           <button
                             onClick={() =>
@@ -440,7 +440,7 @@ export default function Accounts() {
           </div>
         </div>
 
-        {/* MODAL FORM */}
+        
         <AnimatePresence>
           {showForm && (
             <motion.div
@@ -476,7 +476,7 @@ export default function Accounts() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  {/* NOM */}
+                  
                   <div>
                     <label className="text-xs font-medium text-gray-700">Nom du compte</label>
                     <input
@@ -490,7 +490,7 @@ export default function Accounts() {
                     />
                   </div>
 
-                  {/* TYPE */}
+                  
                   <div>
                     <label className="text-xs font-medium text-gray-700">Type</label>
                     <select
@@ -509,7 +509,7 @@ export default function Accounts() {
                     </select>
                   </div>
 
-                  {/* PRODUIT */}
+                  
                   <div>
                     <label className="text-xs font-medium text-gray-700">Produit / compte précis</label>
                     <select
@@ -533,7 +533,7 @@ export default function Accounts() {
                     </select>
                   </div>
 
-                  {/* SOLDE + DEVISE */}
+                  
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-medium text-gray-700">Solde initial</label>
@@ -563,7 +563,7 @@ export default function Accounts() {
                     </div>
                   </div>
 
-                  {/* BOUTONS */}
+                  
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
@@ -596,7 +596,7 @@ export default function Accounts() {
   );
 }
 
-// COMPONENT SIDEBAR ITEM
+
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button

@@ -3,7 +3,7 @@ import datetime as dt
 from supabase import create_client
 import pytz
 
-# ----------------- Config -----------------
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -40,12 +40,12 @@ def main():
 
     print(f"🕒 Fenêtre: depuis {start_iso} (UTC) ~ {LOOKBACK_YEARS} an(s)")
 
-    seen = set()  # (instrument_id, day)
+    seen = set()  
     batch_payload = []
     total_rows = 0
     total_daily_points = 0
 
-    # Pagination keyset: on récupère les pages avant le dernier fetched_at lu
+    
     cursor_fetched_at = None
 
     now_str = dt.datetime.utcnow().isoformat()
@@ -53,13 +53,13 @@ def main():
     while True:
         q = (
             supabase.table("asset_prices")
-            .select("instrument_id, price, fetched_at")  # si tu as "id", ajoute-le ici
+            .select("instrument_id, price, fetched_at")  
             .gte("fetched_at", start_iso)
             .order("fetched_at", desc=True)
             .limit(PAGE_SIZE)
         )
 
-        # Keyset pagination (au lieu d'OFFSET)
+        
         if cursor_fetched_at is not None:
             q = q.lt("fetched_at", cursor_fetched_at)
 
@@ -70,7 +70,7 @@ def main():
 
         total_rows += len(rows)
 
-        # curseur = fetched_at du dernier élément de la page (le plus ancien de la page)
+        
         cursor_fetched_at = rows[-1].get("fetched_at")
 
         for r in rows:
@@ -88,7 +88,7 @@ def main():
 
             key = (instrument_id, day)
 
-            # comme on lit en DESC, le 1er vu par (instrument, day) = dernier prix du jour
+            
             if key in seen:
                 continue
 
@@ -105,7 +105,7 @@ def main():
                 }
             )
 
-            # flush batch
+            
             if len(batch_payload) >= UPSERT_BATCH:
                 supabase.table("asset_prices_daily").upsert(
                     batch_payload,
@@ -117,7 +117,7 @@ def main():
             f"… page ok | rows lus={total_rows} | daily points={total_daily_points} | curseur={cursor_fetched_at}"
         )
 
-    # flush final
+    
     if batch_payload:
         supabase.table("asset_prices_daily").upsert(
             batch_payload,
@@ -130,7 +130,7 @@ def main():
 
     print(f"✅ asset_prices_daily mise à jour. points={total_daily_points}")
 
-    # Optionnel : purge des jours hors fenêtre (pour garder une table propre)
+    
     cutoff_day = (now_utc.astimezone(TZ_PARIS).date() - dt.timedelta(days=365 * LOOKBACK_YEARS + 10)).isoformat()
     print(f"🧹 Purge optionnelle des days < {cutoff_day}")
     supabase.table("asset_prices_daily").delete().lt("day", cutoff_day).execute()

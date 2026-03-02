@@ -5,10 +5,10 @@ export default function FinnhubTest() {
   useEffect(() => {
     const run = async () => {
       try {
-        const search = await searchInstrument("AAPL"); // Recherche Apple
+        const search = await searchInstrument("AAPL"); 
         console.log("🔍 Résultat SEARCH :", search);
 
-        const quote = await getQuote("AAPL"); // Cours Apple
+        const quote = await getQuote("AAPL"); 
         console.log("💵 Résultat QUOTE :", quote);
       } catch (error) {
         console.error("❌ Erreur Finnhub :", error);

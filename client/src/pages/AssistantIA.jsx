@@ -1,4 +1,4 @@
-// src/pages/AssistantIA.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -22,14 +22,14 @@ export default function AssistantIA() {
 
   const [userEmail, setUserEmail] = useState("");
 
-  // Chat
+  
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loadingAi, setLoadingAi] = useState(false);
   const [aiError, setAiError] = useState("");
 
-  // Historique local
-  const [history, setHistory] = useState([]); // {q, a, at}
+  
+  const [history, setHistory] = useState([]); 
 
   const activePath = location.pathname;
 
@@ -92,7 +92,7 @@ export default function AssistantIA() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">OLYMPE</p>
@@ -163,9 +163,9 @@ export default function AssistantIA() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* HEADER */}
+        
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
             <p className="text-sm font-semibold text-gray-900">Assistant IA</p>
@@ -186,10 +186,10 @@ export default function AssistantIA() {
           </button>
         </header>
 
-        {/* ✅ IMPORTANT : on retire motion.div pour éviter le crash removeChild */}
+        
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="max-w-4xl mx-auto space-y-4">
-            {/* Input */}
+            
             <div className="bg-white rounded-2xl border border-gray-200 p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -228,7 +228,7 @@ export default function AssistantIA() {
                 </div>
               )}
 
-              {/* Answer */}
+              
               <div className="mt-4">
                 {loadingAi ? (
                   <div className="text-xs text-gray-500">
@@ -245,7 +245,7 @@ export default function AssistantIA() {
               </div>
             </div>
 
-            {/* Historique */}
+            
             <div className="bg-white rounded-2xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-800">Historique (local)</h3>
               <p className="text-xs text-gray-500 mb-3">Garde les 20 dernières réponses sur cette page.</p>

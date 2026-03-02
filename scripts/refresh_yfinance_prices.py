@@ -1,4 +1,4 @@
-# scripts/refresh_yfinance_prices.py
+
 
 import os
 from datetime import datetime, timezone
@@ -23,14 +23,14 @@ def fetch_yf_price(symbol: str) -> float | None:
     """
     try:
         ticker = yf.Ticker(symbol)
-        # Dernières données sur 1 jour, pas besoin de plus
+        
         hist = ticker.history(period="1d", interval="1m")
 
         if hist is None or hist.empty:
             log("Pas de data yfinance pour", symbol)
             return None
 
-        # On prend la dernière ligne non NaN
+        
         last_valid = hist["Close"].dropna()
         if last_valid.empty:
             log("Pas de Close valide pour", symbol)
@@ -72,7 +72,7 @@ def get_last_recorded_price(instrument_id: str) -> float | None:
 def main():
     log("=== Début refresh via yfinance ===")
 
-    # 1) Récupérer les holdings > 0 avec instrument_id + symbol
+    
     res = (
         supabase.table("holdings")
         .select(
@@ -96,8 +96,8 @@ def main():
         log("Aucun holding > 0, fin.")
         return
 
-    # 2) Regrouper par instrument_id pour éviter les doublons
-    instruments_map: dict[str, dict] = {}  # instrument_id -> { symbol, holdings: [] }
+    
+    instruments_map: dict[str, dict] = {}  
 
     for row in holdings:
         instrument_id = row.get("instrument_id")
@@ -126,7 +126,7 @@ def main():
     updated = 0
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 3) Pour chaque instrument, on récupère le prix + mise à jour
+    
     for instrument_id, info in instruments_map.items():
         symbol = info["symbol"]
         symbol_str = str(symbol)
@@ -140,11 +140,11 @@ def main():
 
         log("Prix yfinance retenu pour", symbol_str, "=", price)
 
-        # 3a) Vérifier le dernier prix enregistré pour éviter les doublons
+        
         last_price = get_last_recorded_price(instrument_id)
         is_duplicate = False
         if last_price is not None:
-            # on met un petit epsilon pour éviter les soucis de flottants
+            
             if abs(last_price - price) < 1e-6:
                 is_duplicate = True
 
@@ -155,14 +155,14 @@ def main():
                 "(asset_prices non mis à jour).",
             )
         else:
-            # Insert historique dans asset_prices uniquement si le prix change
+            
             insert_res = (
                 supabase.table("asset_prices")
                 .insert(
                     {
                         "instrument_id": instrument_id,
                         "price": price,
-                        "currency": "EUR",  # adapte si besoin
+                        "currency": "EUR",  
                         "source": "yfinance",
                         "fetched_at": now_iso,
                     }
@@ -172,11 +172,11 @@ def main():
 
             if insert_res.data is None:
                 log("Erreur insert asset_prices pour", instrument_id, ":", insert_res)
-                # on continue mais on le signale
+                
             else:
                 log("Insertion asset_prices OK pour", instrument_id)
 
-        # 3b) Mise à jour des holdings liés (toujours, même si prix identique)
+        
         for h in info["holdings"]:
             holding_id = h["id"]
             qty = float(h.get("quantity") or 0)
@@ -206,5 +206,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# test commentaire
-#
+

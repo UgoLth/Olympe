@@ -18,7 +18,7 @@ def to_float(v):
 
 
 def paris_day_today() -> str:
-    # YYYY-MM-DD en heure de Paris
+    
     return datetime.now(PARIS).date().isoformat()
 
 
@@ -36,7 +36,7 @@ def latest_price_for_day(rows, target_day: str) -> dict:
         if not fetched_at or not inst:
             continue
 
-        # fetched_at est timestamptz => on parse comme datetime ISO
+        
         dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(PARIS)
         d = dt.date().isoformat()
 
@@ -57,8 +57,8 @@ def main():
 
     day = paris_day_today()
 
-    # 1) Récupérer tous les users ayant des comptes/holdings
-    # (simple : on prend les user_id depuis accounts)
+    
+    
     acc_rows = supabase.table("accounts").select("user_id").execute().data or []
     user_ids = sorted({r["user_id"] for r in acc_rows if r.get("user_id")})
 
@@ -66,9 +66,9 @@ def main():
         print("No users found (no accounts).")
         return
 
-    # 2) Pour chaque user : calcule total_value du jour
+    
     for uid in user_ids:
-        # Accounts
+        
         accounts = (
             supabase.table("accounts")
             .select("id,user_id,current_amount")
@@ -78,7 +78,7 @@ def main():
             or []
         )
 
-        # Holdings
+        
         holdings = (
             supabase.table("holdings")
             .select("id,user_id,account_id,instrument_id,quantity,current_price,current_value")
@@ -88,17 +88,17 @@ def main():
             or []
         )
 
-        # Instrument ids
+        
         instrument_ids = sorted({h["instrument_id"] for h in holdings if h.get("instrument_id")})
         prices_map = {}
 
         if instrument_ids:
-            # On récupère LARGE : toutes les quotes récentes puis on filtre le jour Paris.
-            # Plus safe : chercher entre "day Paris start/end" converti en UTC.
-            # Ici on fait simple : on récupère les 2 derniers jours et on filtre en Paris.
-            # (évite le problème UTC/Paris + décalage minuit)
+            
+            
+            
+            
             now_utc = datetime.utcnow()
-            # 48h back
+            
             from_iso = (now_utc.replace(microsecond=0)).isoformat() + "Z"
 
             price_rows = (
@@ -106,7 +106,7 @@ def main():
                 .select("instrument_id,price,fetched_at")
                 .in_("instrument_id", instrument_ids)
                 .order("fetched_at", desc=True)
-                .limit(5000)  # à ajuster si beaucoup de quotes
+                .limit(5000)  
                 .execute()
                 .data
                 or []
@@ -114,7 +114,7 @@ def main():
 
             prices_map = latest_price_for_day(price_rows, day)
 
-        # --- Valeur holdings ---
+        
         total_holdings_value = 0.0
         accounts_with_holdings = set()
 
@@ -126,10 +126,10 @@ def main():
 
             inst = h["instrument_id"]
 
-            # priorité : prix daily (asset_prices) du jour Paris
+            
             daily_price = prices_map.get(inst)
 
-            # fallback : current_value si dispo, sinon current_price
+            
             if daily_price is None:
                 cv = h.get("current_value")
                 if cv is not None:
@@ -139,7 +139,7 @@ def main():
             else:
                 total_holdings_value += qty * to_float(daily_price)
 
-        # --- Valeur comptes "standalone" (comme ton front actuel) ---
+        
         total_standalone = 0.0
         for a in accounts:
             aid = a.get("id")
@@ -148,7 +148,7 @@ def main():
 
         total_value = total_holdings_value + total_standalone
 
-        # 3) Upsert 1 ligne / user / day
+        
         payload = {
             "user_id": uid,
             "day": day,

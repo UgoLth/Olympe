@@ -1,4 +1,4 @@
-// src/pages/Glossary.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -17,9 +17,9 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
-// ---- Données du glossaire (tu peux en ajouter autant que tu veux) ----
+
 const glossaryData = [
-  // 🏦 COMPTES & ÉPARGNE
+  
   {
     id: "compte-courant",
     terme: "Compte courant",
@@ -224,7 +224,7 @@ const glossaryData = [
       "À utiliser pour immobiliser une somme pendant 6 mois, 1 an ou plus, en échange d’un taux garanti.",
   },
 
-  // 📦 COMPTES D'INVESTISSEMENT
+  
   {
     id: "pea",
     terme: "PEA (Plan d'Épargne en Actions)",
@@ -354,7 +354,7 @@ const glossaryData = [
       "À utiliser si tu veux une exposition directe aux crypto-actifs (Bitcoin, Ethereum, etc.).",
   },
 
-  // 📈 PRODUITS FINANCIERS
+  
   {
     id: "action",
     terme: "Action",
@@ -573,7 +573,7 @@ const glossaryData = [
       "Intéressant pour parquer temporairement des gains ou se protéger d’un mouvement court terme dans la crypto.",
   },
 
-  // 📊 INDICATEURS & NOTIONS
+  
   {
     id: "patrimoine-total",
     terme: "Patrimoine total",
@@ -848,7 +848,7 @@ const glossaryData = [
       "À constituer en épargne de précaution (3 à 6 mois de dépenses, par exemple).",
   },
 
-  // ⚠️ GESTION DU RISQUE
+  
   {
     id: "risque",
     terme: "Risque",
@@ -954,7 +954,7 @@ const glossaryData = [
       "À éviter dans une logique de long terme pour un particulier débutant. À manipuler avec prudence.",
   },
 
-  // 🪙 CRYPTO & WEB3
+  
   {
     id: "blockchain",
     terme: "Blockchain",
@@ -1055,7 +1055,7 @@ const glossaryData = [
       "Utilisé pour entrer ou sortir du marché crypto, ou pour échanger une crypto contre une autre.",
   },
 
-  // 💶 FISCALITÉ (NOTIONS GÉNÉRALES)
+  
   {
     id: "plus-value-imposable",
     terme: "Plus-value imposable",
@@ -1115,7 +1115,7 @@ export default function Glossary() {
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [openedIds, setOpenedIds] = useState([]);
 
-  // Vérifie qu'un utilisateur est connecté (comme dans Dashboard)
+  
   useEffect(() => {
     const checkUser = async () => {
       const { data } = await supabase.auth.getUser();
@@ -1128,7 +1128,7 @@ export default function Glossary() {
     checkUser();
   }, [navigate]);
 
-  // Gestion du "Se souvenir de moi" (comme dans Dashboard)
+  
   useEffect(() => {
     const handleBeforeUnload = async () => {
       const remember = localStorage.getItem("olympe_remember_me");
@@ -1147,7 +1147,7 @@ export default function Glossary() {
     navigate("/");
   };
 
-  const totalValue = "— €"; // même placeholder que sur le Dashboard
+  const totalValue = "— €"; 
 
   const filteredGlossary = useMemo(() => {
     return glossaryData.filter((item) => {
@@ -1172,9 +1172,9 @@ export default function Glossary() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR (même que Dashboard, avec Glossaire actif) */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
-        {/* TITRE + EMAIL */}
+        
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
             OLYMPE
@@ -1184,7 +1184,7 @@ export default function Glossary() {
           </p>
         </div>
 
-        {/* Menu */}
+        
         <nav className="flex-1 px-4 py-6 space-y-1">
           <SidebarItem
             icon={Home}
@@ -1221,7 +1221,7 @@ export default function Glossary() {
 
         </nav>
 
-        {/* Bottom */}
+        
         <div className="mt-auto px-4 pb-4 space-y-2">
           <button
             onClick={() => navigate("/settings")}
@@ -1241,9 +1241,9 @@ export default function Glossary() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* TOPBAR (comme Dashboard) */}
+        
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
             <p className="text-sm text-gray-500">
@@ -1263,10 +1263,10 @@ export default function Glossary() {
           </div>
         </header>
 
-        {/* CONTENU GLOSSAIRE */}
+        
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="max-w-6xl mx-auto space-y-6">
-            {/* Titre + recherche */}
+            
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h1 className="text-2xl font-semibold text-gray-900">
@@ -1291,7 +1291,7 @@ export default function Glossary() {
               </div>
             </div>
 
-            {/* Filtres catégories */}
+            
             <div className="flex flex-wrap gap-2">
               {categories.map((cat) => (
                 <button
@@ -1308,7 +1308,7 @@ export default function Glossary() {
               ))}
             </div>
 
-            {/* Résumé */}
+            
             <div className="flex items-center justify-between text-xs text-gray-500">
               <span>
                 {filteredGlossary.length} terme
@@ -1321,7 +1321,7 @@ export default function Glossary() {
               </span>
             </div>
 
-            {/* Cartes glossaire */}
+            
             {filteredGlossary.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {filteredGlossary.map((item) => {
@@ -1331,7 +1331,7 @@ export default function Glossary() {
                       key={item.id}
                       className="group flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-md"
                     >
-                      {/* Header de la carte */}
+                      
                       <button
                         type="button"
                         onClick={() => toggleOpen(item.id)}
@@ -1345,7 +1345,7 @@ export default function Glossary() {
                           <h2 className="mt-2 text-base font-semibold text-gray-900">
                             {item.terme}
                           </h2>
-                          {/* Résumé simple toujours visible */}
+                          
                           <p className="mt-1 text-xs text-gray-500">
                             {item.resume}
                           </p>
@@ -1359,7 +1359,7 @@ export default function Glossary() {
                         </div>
                       </button>
 
-                      {/* Accordéon moderne + animations fluides */}
+                      
                       <div
                         className={`overflow-hidden transition-all duration-300 ease-out ${
                           isOpen
@@ -1372,7 +1372,7 @@ export default function Glossary() {
                             isOpen ? "translate-y-0" : "-translate-y-1"
                           }`}
                         >
-                          {/* En bref : bandeau accent */}
+                          
                           <div className="rounded-lg border-l-4 border-[#D4AF37] bg-[#FFF8E7] px-3 py-2">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#D4AF37]">
                               En bref
@@ -1380,9 +1380,9 @@ export default function Glossary() {
                             <p className="mt-1 text-gray-800">{item.resume}</p>
                           </div>
 
-                          {/* Grid des détails */}
+                          
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            {/* Colonne 1 : Définition + Profil */}
+                            
                             <div className="space-y-3">
                               <div className="rounded-lg bg-gray-50 p-3">
                                 <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
@@ -1405,7 +1405,7 @@ export default function Glossary() {
                               )}
                             </div>
 
-                            {/* Colonne 2 : Avantages / Inconvénients */}
+                            
                             <div className="space-y-3">
                               {item.avantages && (
                                 <div className="rounded-lg bg-emerald-50 p-3">
@@ -1434,7 +1434,7 @@ export default function Glossary() {
                               )}
                             </div>
 
-                            {/* Bas de carte : situations */}
+                            
                             {item.situations && (
                               <div className="md:col-span-2 rounded-lg border border-dashed border-[#D4AF37]/40 bg-[#FFFBF2] p-3">
                                 <p className="text-[11px] font-semibold uppercase tracking-wide text-[#D4AF37]">
@@ -1466,7 +1466,7 @@ export default function Glossary() {
   );
 }
 
-// Composant interne pour les items du menu (même style que Dashboard)
+
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button

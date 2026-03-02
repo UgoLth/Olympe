@@ -8,15 +8,15 @@ import logoOlympe from "../assets/Olyme_logo_remove.png";
 export default function Auth() {
   const navigate = useNavigate();
 
-  const [mode, setMode] = useState("login"); // "login" ou "register"
+  const [mode, setMode] = useState("login"); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState(""); // ✅ nouveau
+  const [confirmPassword, setConfirmPassword] = useState(""); 
   const [remember, setRemember] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ✅ Règles : 12+ caractères, 1 maj, 1 min, 1 chiffre, 1 spécial
+  
   const passwordRegex =
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/;
 
@@ -26,7 +26,7 @@ export default function Auth() {
     setLoading(true);
 
     try {
-      // ✅ validations uniquement en register
+      
       if (mode === "register") {
         if (password !== confirmPassword) {
           throw new Error("Les mots de passe ne correspondent pas.");
@@ -55,24 +55,24 @@ export default function Auth() {
       }
 
       if (mode === "register") {
-        // 1️⃣ Création du compte
+        
         const { error } = await supabase.auth.signUp({
           email,
           password,
         });
         if (error) throw error;
 
-        // 2️⃣ Connexion auto juste après inscription
+        
         const { error: loginError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (loginError) throw loginError;
 
-        // 3️⃣ remember me par défaut
+        
         localStorage.setItem("olympe_remember_me", "1");
 
-        // 4️⃣ Redirection
+        
         navigate("/dashboard");
       }
     } catch (err) {
@@ -85,9 +85,9 @@ export default function Auth() {
   return (
     <div className="min-h-screen bg-[#0f1013] text-white flex items-center justify-center px-6 lg:px-16">
       <div className="w-full max-w-6xl flex gap-10 items-center">
-        {/* --- CARTE AUTH --- */}
+        
         <div className="w-full max-w-md bg-[#15161b]/95 border border-white/5 rounded-3xl p-8 shadow-[0_20px_80px_rgba(0,0,0,.35)]">
-          {/* Logo */}
+          
           <div className="flex justify-center mb-4">
             <img
               src={logoOlympe}
@@ -96,7 +96,7 @@ export default function Auth() {
             />
           </div>
 
-          {/* Bloc animé login/register */}
+          
           <AnimatePresence mode="wait">
             <motion.div
               key={mode}
@@ -138,7 +138,7 @@ export default function Auth() {
                   />
                 </div>
 
-                {/* ✅ Champ confirmation uniquement en register */}
+                
                 {mode === "register" && (
                   <div>
                     <label className="text-sm mb-1 block">
@@ -154,7 +154,7 @@ export default function Auth() {
                       autoComplete="new-password"
                     />
 
-                    {/* petit rappel des règles (optionnel mais utile) */}
+                    
                     <p className="text-[11px] text-white/45 mt-2 leading-snug">
                       Minimum 12 caractères avec 1 majuscule, 1 minuscule, 1
                       chiffre et 1 caractère spécial.
@@ -162,7 +162,7 @@ export default function Auth() {
                   </div>
                 )}
 
-                {/* Options spécifiques au mode login */}
+                
                 {mode === "login" && (
                   <div className="flex items-center justify-between gap-4 text-sm">
                     <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -205,7 +205,7 @@ export default function Auth() {
                 </button>
               </form>
 
-              {/* Switch texte en bas */}
+              
               <p className="text-xs text-white/50 mt-6 text-center">
                 {mode === "login" ? (
                   <>
@@ -245,7 +245,7 @@ export default function Auth() {
           </AnimatePresence>
         </div>
 
-        {/* --- PARTIE DROITE (illustration) --- */}
+        
         <div className="hidden lg:block flex-1 relative h-[460px]">
           <img
             src={heroImg}

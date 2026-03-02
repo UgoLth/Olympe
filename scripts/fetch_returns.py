@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 import yfinance as yf
 from supabase import create_client
 
-# --- Config Supabase ---
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -17,17 +17,17 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Rendement sur 1 an
+
 YEARS = 1
 
-# Historique daily à stocker (si tu veux “tout”, mets 20 ou "max" via yfinance)
-HISTORY_YEARS = 10  # ex: 10 ans d'historique daily
 
-# Batch pour upsert (évite les payloads trop gros)
+HISTORY_YEARS = 10  
+
+
 UPSERT_BATCH = 500
 
 
-# ---------------------------------------------------------------------------
+
 
 def calculate_cagr(price_start: float, price_end: float, years: int) -> Optional[float]:
     if years <= 0 or price_start <= 0 or price_end <= 0:
@@ -75,7 +75,7 @@ def fetch_daily_history(symbol: str, years: int) -> Optional[Any]:
     end = dt.datetime.utcnow()
     start = end - dt.timedelta(days=365 * years)
 
-    # interval="1d" obligatoire pour être cohérent avec asset_prices_daily
+    
     df = yf.download(
         symbol,
         start=start,
@@ -115,18 +115,18 @@ def upsert_asset_prices_daily(instrument_id: str, close_series, source: str = "y
     """
     rows: List[Dict[str, Any]] = []
 
-    # close_series index = DatetimeIndex (timezone-naive en général)
+    
     for ts, price in close_series.items():
         if price is None or (isinstance(price, float) and (math.isnan(price) or math.isinf(price))):
             continue
 
-        day = ts.date().isoformat()  # "YYYY-MM-DD"
+        day = ts.date().isoformat()  
         rows.append({
             "instrument_id": instrument_id,
             "day": day,
             "price": float(price),
             "source": source,
-            # pas besoin de created_at/updated_at si gérés par la DB
+            
         })
 
     if not rows:
@@ -134,7 +134,7 @@ def upsert_asset_prices_daily(instrument_id: str, close_series, source: str = "y
 
     total_upserted = 0
     for batch in chunked(rows, UPSERT_BATCH):
-        # ⚠️ nécessite UNIQUE(instrument_id, day) pour que upsert cible bien la bonne ligne
+        
         supabase.table("asset_prices_daily").upsert(batch).execute()
         total_upserted += len(batch)
 
@@ -148,12 +148,12 @@ def upsert_instrument_return(instrument_id: str, close_series, years: int, sourc
     if close_series is None or close_series.empty:
         return None
 
-    # On prend la fenêtre des 365*years derniers jours (en daily, yfinance peut manquer les week-ends)
+    
     end_price = float(close_series.iloc[-1])
 
-    # on remonte ~ years en arrière (approximatif en jours ouvrés)
-    # si tu veux plus strict : trouver la première date >= (today - 365*years)
-    start_index = max(0, len(close_series) - (252 * years))  # ~252 jours de bourse/an
+    
+    
+    start_index = max(0, len(close_series) - (252 * years))  
     start_price = float(close_series.iloc[start_index])
 
     cagr = calculate_cagr(start_price, end_price, years)
@@ -189,11 +189,11 @@ def fetch_and_store(inst: Dict[str, Any]) -> None:
         print(f"⚠ Ni 'Adj Close' ni 'Close' pour {symbol}")
         return
 
-    # 1) Remplir asset_prices_daily
+    
     upserted = upsert_asset_prices_daily(iid, closes, source="yfinance")
     print(f"✅ asset_prices_daily upserted rows: {upserted}")
 
-    # 2) Mettre à jour instrument_returns (CAGR 1 an)
+    
     cagr = upsert_instrument_return(iid, closes, YEARS, source="yfinance")
     if cagr is None:
         print(f"⚠ Impossible de calculer le rendement 1 an pour {symbol}")

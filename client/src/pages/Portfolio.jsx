@@ -14,7 +14,7 @@ import {
 import { supabase } from "../lib/supabaseClient";
 import { motion } from "framer-motion";
 
-// 🎨 Chart.js
+
 import { Doughnut } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
 
@@ -39,7 +39,7 @@ export default function Portfolio() {
   const toNumber = (v) =>
     v === null || v === undefined || v === "" ? 0 : Number(v);
 
-  // Variants pour les KPI (stagger)
+  
   const kpiVariants = {
     hidden: { opacity: 0, y: 10 },
     show: (i) => ({
@@ -49,7 +49,7 @@ export default function Portfolio() {
     }),
   };
 
-  // ---------- AUTH + INIT ----------
+  
   useEffect(() => {
     const init = async () => {
       const { data, error } = await supabase.auth.getUser();
@@ -63,7 +63,7 @@ export default function Portfolio() {
     init();
   }, [navigate]);
 
-  // Gestion du "Se souvenir de moi"
+  
   useEffect(() => {
     const handleBeforeUnload = async () => {
       const remember = localStorage.getItem("olympe_remember_me");
@@ -81,14 +81,14 @@ export default function Portfolio() {
     navigate("/");
   };
 
-  // ---------- CATEGORISATION POUR LE CAMEMBERT ----------
+  
   const categorizePosition = (accountType, assetClass) => {
     const norm = (s) => (s || "").toLowerCase();
 
     const t = norm(accountType);
     const a = norm(assetClass);
 
-    // 1️⃣ d'abord selon le type de compte
+    
     if (t.includes("cash") || t.includes("courant") || t.includes("current")) {
       return "Liquidités";
     }
@@ -110,7 +110,7 @@ export default function Portfolio() {
       return "Investissements";
     }
 
-    // 2️⃣ fallback selon asset_class
+    
     if (a.includes("crypto")) return "Crypto";
     if (a.includes("cash")) return "Liquidités";
     if (
@@ -121,15 +121,15 @@ export default function Portfolio() {
     )
       return "Investissements";
 
-    // 3️⃣ sinon
+    
     return "Autres";
   };
 
-  // ---------- LOAD PORTFOLIO ----------
+  
   const loadPortfolio = async (userId) => {
     setLoading(true);
     try {
-      // 1) comptes
+      
       const { data: accounts, error: accError } = await supabase
         .from("accounts")
         .select("id, name, type, currency, current_amount, created_at")
@@ -138,7 +138,7 @@ export default function Portfolio() {
 
       if (accError) throw accError;
 
-      // 2) holdings
+      
       const { data: holdingsData, error: holdError } = await supabase
         .from("holdings")
         .select(
@@ -152,7 +152,7 @@ export default function Portfolio() {
         (accounts || []).map((a) => [a.id, a])
       );
 
-      // 3) instruments
+      
       const instrumentIds = Array.from(
         new Set(
           (holdingsData || [])
@@ -175,7 +175,7 @@ export default function Portfolio() {
         );
       }
 
-      // 4) prix historiques pour calculer les variations jour / 30 jours
+      
       let prev1dByInstrument = {};
       let prev30dByInstrument = {};
 
@@ -190,7 +190,7 @@ export default function Portfolio() {
         date30d.setDate(now.getDate() - 30);
         const iso30d = date30d.toISOString();
 
-        // Prix depuis D-1
+        
         const { data: prices1d, error: p1Error } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
@@ -204,12 +204,12 @@ export default function Portfolio() {
           for (const p of prices1d) {
             const id = p.instrument_id;
             if (!prev1dByInstrument[id]) {
-              prev1dByInstrument[id] = toNumber(p.price); // premier prix après D-1
+              prev1dByInstrument[id] = toNumber(p.price); 
             }
           }
         }
 
-        // Prix depuis D-30
+        
         const { data: prices30d, error: p30Error } = await supabase
           .from("asset_prices")
           .select("instrument_id, price, fetched_at")
@@ -223,13 +223,13 @@ export default function Portfolio() {
           for (const p of prices30d) {
             const id = p.instrument_id;
             if (!prev30dByInstrument[id]) {
-              prev30dByInstrument[id] = toNumber(p.price); // premier prix après D-30
+              prev30dByInstrument[id] = toNumber(p.price); 
             }
           }
         }
       }
 
-      // -------- LIGNES DE PORTEFEUILLE ----------
+      
       let totalHoldingsValue = 0;
 
       const computedHoldings = (holdingsData || []).map((h) => {
@@ -282,7 +282,7 @@ export default function Portfolio() {
         };
       });
 
-      // comptes sans holdings (ex : livrets / cash)
+      
       const accountsWithHoldings = new Set(
         (holdingsData || []).map((h) => h.account_id)
       );
@@ -303,7 +303,7 @@ export default function Portfolio() {
           totalValue > 0 ? Math.round((h.value / totalValue) * 100) : 0,
       }));
 
-      // -------- CAMEMBERT ----------
+      
       const categoryTotals = {};
       const addToCategory = (label, amount) => {
         if (!categoryTotals[label]) categoryTotals[label] = 0;
@@ -320,13 +320,13 @@ export default function Portfolio() {
         addToCategory(label, toNumber(a.current_amount));
       });
 
-      // palette Olympe (or / noir / neutres)
+      
       const palette = {
-        Liquidités: "#111827", // anthracite
-        Épargne: "#D4AF37", // or
-        Investissements: "#1D4ED8", // bleu roi
-        Crypto: "#F59E0B", // or chaud
-        Autres: "#6B7280", // gris neutre
+        Liquidités: "#111827", 
+        Épargne: "#D4AF37", 
+        Investissements: "#1D4ED8", 
+        Crypto: "#F59E0B", 
+        Autres: "#6B7280", 
       };
 
       const computedAllocations = Object.entries(categoryTotals).map(
@@ -340,7 +340,7 @@ export default function Portfolio() {
         })
       );
 
-      // -------- VARIATIONS PORTFEUILLE ----------
+      
       let portfolioDaily = 0;
       let portfolioMonthly = 0;
 
@@ -371,7 +371,7 @@ export default function Portfolio() {
     }
   };
 
-  // ---------- FORMATAGE ----------
+  
   const formatCurrency = (value) =>
     value === null || value === undefined
       ? "—"
@@ -383,7 +383,7 @@ export default function Portfolio() {
 
   const totalValueDisplay = formatCurrency(summary.totalValue);
 
-  // ---------- DATA CAMEMBERT ----------
+  
   const hasAllocations =
     allocations.length > 0 && allocations.some((a) => a.percent > 0);
 
@@ -421,10 +421,10 @@ export default function Portfolio() {
     },
   };
 
-  // ---------- RENDER ----------
+  
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
@@ -490,7 +490,7 @@ export default function Portfolio() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
@@ -509,11 +509,11 @@ export default function Portfolio() {
                 {totalValueDisplay}
               </p>
             </div>
-            {/* Bouton "Rafraîchir les cours" supprimé */}
+            
           </div>
         </header>
 
-        {/* CONTENT */}
+        
         <motion.div
           className="flex-1 p-6 overflow-y-auto space-y-6"
           initial={{ opacity: 0, y: 16 }}
@@ -527,7 +527,7 @@ export default function Portfolio() {
             </div>
           ) : (
             <>
-              {/* KPIs */}
+              
               <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
                   {
@@ -574,9 +574,9 @@ export default function Portfolio() {
                 ))}
               </section>
 
-              {/* Répartition + légende */}
+              
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Camembert */}
+                
                 <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
                   <div className="flex items-center justify-between mb-4">
                     <div>
@@ -602,10 +602,10 @@ export default function Portfolio() {
                           damping: 15,
                         }}
                       >
-                        {/* halo */}
+                        
                         <div className="absolute inset-4 rounded-full bg-[radial-gradient(circle_at_30%_0,#D4AF37_0,#F9FAFB_40%,#E5E7EB_80%)] opacity-30 blur-md" />
 
-                        {/* graphe */}
+                        
                         <div className="relative h-full w-full bg-white rounded-full">
                           <Doughnut
                             data={doughnutData}
@@ -613,7 +613,7 @@ export default function Portfolio() {
                           />
                         </div>
 
-                        {/* valeur totale au centre */}
+                        
                         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                           <span className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
                             Total
@@ -631,7 +631,7 @@ export default function Portfolio() {
                   </div>
                 </div>
 
-                {/* Légende / catégories */}
+                
                 <div className="bg-white rounded-2xl border border-gray-200 p-5">
                   <h2 className="text-sm font-semibold text-gray-800 mb-4">
                     Détail des catégories
@@ -671,7 +671,7 @@ export default function Portfolio() {
                 </div>
               </section>
 
-              {/* Tableau des placements */}
+              
               <section className="bg-white rounded-2xl border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -807,7 +807,7 @@ export default function Portfolio() {
   );
 }
 
-// 📌 Item de sidebar
+
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
@@ -824,7 +824,7 @@ function SidebarItem({ icon: Icon, label, active, onClick }) {
   );
 }
 
-// 📌 Petite card KPI
+
 function KpiCard({ label, value, subtitle, positive }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 flex flex-col justify-between transition-transform transition-shadow duration-200 hover:shadow-[0_12px_30px_rgba(15,16,19,0.12)] hover:-translate-y-[2px]">

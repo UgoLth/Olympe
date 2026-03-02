@@ -1,4 +1,4 @@
-// src/pages/Settings.jsx
+
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -24,7 +24,7 @@ export default function Settings() {
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // ✏️ États pour les formulaires
+  
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -35,7 +35,7 @@ export default function Settings() {
   const [loadingName, setLoadingName] = useState(false);
   const [message, setMessage] = useState("");
 
-  // 🔄 Récupération user + profil
+  
   useEffect(() => {
     const fetchData = async () => {
       const { data, error } = await supabase.auth.getUser();
@@ -75,7 +75,7 @@ export default function Settings() {
       })
     : "";
 
-  // ✉️ Mise à jour de l'email
+  
   const handleUpdateEmail = async (e) => {
     e.preventDefault();
     setMessage("");
@@ -112,7 +112,7 @@ export default function Settings() {
     }
   };
 
-  // 🔐 Mise à jour du mot de passe
+  
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
     setMessage("");
@@ -139,7 +139,7 @@ export default function Settings() {
     }
   };
 
-  // 👤 Mise à jour nom / prénom (table profiles)
+  
   const handleUpdateName = async (e) => {
     e.preventDefault();
     setMessage("");
@@ -149,7 +149,7 @@ export default function Settings() {
       return;
     }
 
-    // Si les deux sont vides, on ne fait rien
+    
     if (!firstName.trim() && !lastName.trim()) {
       setMessage("Merci de renseigner au moins un des deux champs.");
       return;
@@ -160,7 +160,7 @@ export default function Settings() {
       .from("profiles")
       .upsert(
         {
-          id: user.id, // FK vers auth.users.id
+          id: user.id, 
           first_name: firstName.trim() || null,
           last_name: lastName.trim() || null,
         },
@@ -188,7 +188,7 @@ export default function Settings() {
     navigate("/");
   };
 
-  // 🚫 "fausse" suppression : confirmation + déconnexion
+  
   const handleDeleteAccount = async () => {
     const confirmDelete = window.confirm(
       "Es-tu sûr de vouloir supprimer ton compte ?\n\nPour l’instant, cela va simplement te déconnecter."
@@ -203,7 +203,7 @@ export default function Settings() {
 
   return (
     <div className="h-screen bg-[#F5F5F5] flex overflow-hidden">
-      {/* SIDEBAR */}
+      
       <aside className="w-64 bg-[#0F1013] text-white flex flex-col">
         <div className="flex items-start flex-col justify-center px-6 h-16 border-b border-white/5">
           <p className="text-sm tracking-[0.25em] text-[#D4AF37] uppercase">
@@ -268,9 +268,9 @@ export default function Settings() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Topbar */}
+        
         <header className="h-16 bg-white flex items-center justify-between px-6 border-b border-gray-200">
           <div>
             <p className="text-sm text-gray-500">Paramètres du compte</p>
@@ -280,7 +280,7 @@ export default function Settings() {
           </div>
         </header>
 
-        {/* CONTENU AVEC ANIMATION */}
+        
         <motion.div
           className="flex-1 p-6 space-y-6 overflow-y-auto"
           initial={{ opacity: 0, y: 12 }}
@@ -296,7 +296,7 @@ export default function Settings() {
             </div>
           ) : (
             <>
-              {/* Données personnelles */}
+              
               <section className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                 <h2 className="text-lg font-semibold mb-4">
                   Données personnelles
@@ -312,11 +312,11 @@ export default function Settings() {
                 </div>
               </section>
 
-              {/* Actions */}
+              
               <section className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-4">
                 <h2 className="text-lg font-semibold mb-2">Actions</h2>
 
-                {/* Modifier nom / prénom */}
+                
                 <div className="border border-gray-100 rounded-xl p-4 flex flex-col gap-3">
                   <p className="text-sm font-medium">
                     Modifier le nom et le prénom
@@ -349,7 +349,7 @@ export default function Settings() {
                   </form>
                 </div>
 
-                {/* Modifier email */}
+                
                 <div className="border border-gray-100 rounded-xl p-4 flex flex-col gap-3">
                   <p className="text-sm font-medium">
                     Modifier l’adresse email
@@ -375,7 +375,7 @@ export default function Settings() {
                   </form>
                 </div>
 
-                {/* Modifier mot de passe */}
+                
                 <div className="border border-gray-100 rounded-xl p-4 flex flex-col gap-3">
                   <p className="text-sm font-medium">
                     Modifier le mot de passe
@@ -401,7 +401,7 @@ export default function Settings() {
                   </form>
                 </div>
 
-                {/* Supprimer + déconnexion */}
+                
                 <div className="flex flex-col md:flex-row gap-3">
                   <button
                     onClick={handleDeleteAccount}
@@ -429,7 +429,7 @@ export default function Settings() {
   );
 }
 
-// ✅ SidebarItem (même style que Dashboard)
+
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
